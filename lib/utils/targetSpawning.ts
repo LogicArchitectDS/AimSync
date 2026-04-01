@@ -13,11 +13,18 @@ const createTargetId = (): string => {
     return `target-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 };
 
-// 1. The Updated Full-Canvas Spawner (Ghost Zone Fix)
+// 1. The Updated Full-Canvas Spawner with Vertical Safe Zones
+// Top 15% is reserved for the HUD and browser fullscreen bar.
+// Bottom 5% is excluded for visual balance.
 export const getRandomTargetPosition = (canvasWidth: number, canvasHeight: number, radius: number): Position => {
-    const padding = radius + 12;
-    const x = Math.random() * (canvasWidth - padding * 2) + padding;
-    const y = Math.random() * (canvasHeight - padding * 2) + padding;
+    const paddingX = radius + 12;
+    const topSafeZone = canvasHeight * 0.15;
+    const bottomSafeZone = canvasHeight * 0.05;
+
+    const x = Math.random() * (canvasWidth - paddingX * 2) + paddingX;
+    const yMin = topSafeZone + radius;
+    const yMax = canvasHeight - bottomSafeZone - radius;
+    const y = Math.random() * (yMax - yMin) + yMin;
     return { x, y };
 };
 
@@ -33,19 +40,60 @@ export const createStaticTarget = (canvasWidth: number, canvasHeight: number, ra
     };
 };
 
-export const createMicroAdjustTarget = (canvasWidth: number, canvasHeight: number, radius: number, maxOffset = 120): BaseTarget => {
-    const centerX = canvasWidth / 2;
-    const centerY = canvasHeight / 2;
-    const offsetX = (Math.random() - 0.5) * maxOffset * 2;
-    const offsetY = (Math.random() - 0.5) * maxOffset * 2;
+export function createMicroAdjustTarget(
+    canvasWidth: number,
+    canvasHeight: number,
+    targetRadius: number,
+    lastX?: number | null,
+    lastY?: number | null
+): BaseTarget {
+    // Define what "Micro" actually means mathematically.
+    // Minimum distance ensures it doesn't overlap the old target.
+    // Maximum distance ensures it doesn't turn into a wide flick.
+    const MIN_DISTANCE = targetRadius * 3;
+    const MAX_DISTANCE = targetRadius * 8;
+
+    let x = canvasWidth / 2;
+    let y = canvasHeight / 2;
+
+    // If we have a previous target, spawn relative to it
+    if (lastX != null && lastY != null) {
+        let validSpawn = false;
+        let attempts = 0;
+
+        // Try to find a valid spot that doesn't clip off the screen
+        while (!validSpawn && attempts < 50) {
+            const angle = Math.random() * Math.PI * 2;
+            const distance = MIN_DISTANCE + Math.random() * (MAX_DISTANCE - MIN_DISTANCE);
+
+            x = lastX + Math.cos(angle) * distance;
+            y = lastY + Math.sin(angle) * distance;
+
+            // Enforce horizontal margins and vertical safe zones
+            const marginX = targetRadius + 20;
+            const topSafe = canvasHeight * 0.15 + targetRadius;
+            const bottomSafe = canvasHeight - canvasHeight * 0.05 - targetRadius;
+            if (x >= marginX && x <= canvasWidth - marginX && y >= topSafe && y <= bottomSafe) {
+                validSpawn = true;
+            }
+            attempts++;
+        }
+
+        // Failsafe: If the target gets trapped in a literal corner and can't find a valid angle after 50 tries, reset to center.
+        if (!validSpawn) {
+            x = canvasWidth / 2;
+            y = canvasHeight / 2;
+        }
+    }
+
     return {
-        id: createTargetId(),
-        x: centerX + offsetX,
-        y: centerY + offsetY,
-        radius,
+        id: crypto.randomUUID(), // Assuming you use UUIDs, or use Date.now().toString()
+        x,
+        y,
+        radius: targetRadius,
         spawnedAt: performance.now(),
     };
-};
+}
 
 export const getTargetSwitchCount = (difficulty: Difficulty): number => {
     switch (difficulty) {
