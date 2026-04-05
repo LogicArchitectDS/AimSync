@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import type { GameResult, SwitchTarget } from "@/lib/game/types";
 import { difficultyConfig, difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
 import { calculateAccuracy, calculateAverageReactionTime, calculateBestReactionTime, getScaledCanvasCoordinates, isPointInsideTarget } from "@/lib/utils/gameMath";
 import { createTargetSwitchWave } from "@/lib/utils/targetSpawning";
 import { buildGameResult } from "@/lib/utils/resultBuilder";
-import { updateStatsWithResult } from "@/lib/utils/statsStorage";
+import { updateStatsWithResult } from "@/lib/utils/statsService";
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
 
@@ -14,20 +15,28 @@ interface OverrideSettings { difficulty: Difficulty; duration: number; }
 interface TargetSwitchProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
 
 export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitchProps = {}) {
+    const { user } = useAuth();
     const containerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const timeoutRef = useRef<number | null>(null);
+
+    // BUG FIX: Atomic Wave ID tracking to prevent double-spawns
+    const activeWaveId = useRef<number>(0);
     const dimensionsRef = useRef({ width: 1600, height: 900 });
+
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
     const [durationSeconds, setDurationSeconds] = useState<number>(overrideSettings?.duration ?? 30);
+
     const effectiveDifficulty = overrideSettings?.difficulty ?? difficulty;
     const effectiveDuration = overrideSettings?.duration ?? durationSeconds;
+
     const [gameStarted, setGameStarted] = useState(false);
     const [isFinished, setIsFinished] = useState(false);
     const [timeLeft, setTimeLeft] = useState<number>(30);
     const [countdown, setCountdown] = useState<number | null>(null);
-    const [targets, setTargets] = useState<SwitchTarget[]>([]);
+
+    const [targets, setTargets] = useState<(SwitchTarget & { waveId: number })[]>([]);
     const [score, setScore] = useState(0);
     const [hits, setHits] = useState(0);
     const [misses, setMisses] = useState(0);
@@ -35,29 +44,43 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
     const [totalTargetsSpawned, setTotalTargetsSpawned] = useState(0);
     const [missedByTimeout, setMissedByTimeout] = useState(0);
     const [result, setResult] = useState<GameResult | null>(null);
+
     const config = difficultyConfig[effectiveDifficulty];
     const accuracy = useMemo(() => calculateAccuracy(hits, misses), [hits, misses]);
-    const averageReactionTime = useMemo(() => calculateAverageReactionTime(reactionTimes), [reactionTimes]);
-    const bestReactionTime = useMemo(() => calculateBestReactionTime(reactionTimes), [reactionTimes]);
 
-    const clearWaveTimeout = () => { if (timeoutRef.current !== null) { window.clearTimeout(timeoutRef.current); timeoutRef.current = null; } };
+    const clearWaveTimeout = useCallback(() => {
+        if (timeoutRef.current !== null) {
+            window.clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+        }
+    }, []);
 
-    const spawnWave = () => {
+    const spawnWave = useCallback(() => {
         clearWaveTimeout();
-        const wave = createTargetSwitchWave(difficulty, dimensionsRef.current.width, dimensionsRef.current.height, config.targetRadius);
-        setTargets(wave);
+
+        const newWaveId = Date.now();
+        activeWaveId.current = newWaveId;
+
+        const wave = createTargetSwitchWave(effectiveDifficulty, dimensionsRef.current.width, dimensionsRef.current.height, config.targetRadius);
+
+        // Tag every target in this wave with the new ID
+        setTargets(wave.map(t => ({ ...t, waveId: newWaveId })));
         setTotalTargetsSpawned((prev) => prev + wave.length);
+
         timeoutRef.current = window.setTimeout(() => {
-            setMisses((prev) => prev + 1);
-            setMissedByTimeout((prev) => prev + 1);
-            setScore((prev) => Math.max(0, prev - config.missPenalty));
-            spawnWave();
+            if (activeWaveId.current === newWaveId) {
+                setMisses((prev) => prev + 1);
+                setMissedByTimeout((prev) => prev + 1);
+                setScore((prev) => Math.max(0, prev - config.missPenalty));
+                spawnWave();
+            }
         }, config.targetLifetimeMs);
-    };
+    }, [effectiveDifficulty, config, clearWaveTimeout]);
 
     const resetState = () => {
         clearWaveTimeout();
-        setGameStarted(false); setIsFinished(false);        setTimeLeft(effectiveDuration); setCountdown(null);
+        activeWaveId.current = 0;
+        setGameStarted(false); setIsFinished(false); setTimeLeft(effectiveDuration); setCountdown(null);
         setTargets([]); setScore(0); setHits(0); setMisses(0); setReactionTimes([]);
         setTotalTargetsSpawned(0); setMissedByTimeout(0); setResult(null);
     };
@@ -71,23 +94,33 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
 
     const endSession = async () => {
         clearWaveTimeout();
+        activeWaveId.current = 0;
         setGameStarted(false);
         setTargets([]);
-        const resultData = buildGameResult({ mode: "Target Switch", difficulty: difficultyLabels[effectiveDifficulty], score, hits, misses, duration: effectiveDuration, reactionTimes, totalTargetsSpawned, missedByTimeout, extraStats: { "Wave Targets Spawned": totalTargetsSpawned } });
+
+        const resultData = buildGameResult({
+            mode: "Target Switch",
+            difficulty: difficultyLabels[effectiveDifficulty],
+            score, hits, misses,
+            duration: effectiveDuration,
+            reactionTimes, totalTargetsSpawned,
+            missedByTimeout,
+            extraStats: { "Wave Targets Spawned": totalTargetsSpawned }
+        });
+
         updateStatsWithResult(resultData);
 
         if (document.fullscreenElement) await document.exitFullscreen().catch(() => { });
-
         if (onFinish) { onFinish(resultData); } else { setResult(resultData); setIsFinished(true); }
     };
 
     useEffect(() => {
-        if (countdown === null) return;
-        if (countdown === 0) { setCountdown(null); window.setTimeout(() => spawnWave(), 0); return; }
-        const timer = window.setTimeout(() => setCountdown((c) => (c !== null ? c - 1 : null)), 1000);
-        return () => window.clearTimeout(timer);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [countdown]);
+        if (countdown === 0) { setCountdown(null); spawnWave(); }
+        else if (countdown !== null) {
+            const timer = window.setTimeout(() => setCountdown((c) => c! - 1), 1000);
+            return () => window.clearTimeout(timer);
+        }
+    }, [countdown, spawnWave]);
 
     useEffect(() => {
         if (!gameStarted) return;
@@ -96,86 +129,96 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
         return () => window.removeEventListener("resize", updateSize);
     }, [gameStarted]);
 
-    useEffect(() => { setTimeLeft(durationSeconds); }, [durationSeconds]);
     useEffect(() => {
         if (!gameStarted || countdown !== null) return;
         const timer = window.setInterval(() => setTimeLeft((prev) => Math.max(0, prev - 1)), 1000);
         return () => window.clearInterval(timer);
     }, [gameStarted, countdown]);
-    useEffect(() => { if (gameStarted && timeLeft === 0 && !isFinished && countdown === null) endSession(); // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [timeLeft, gameStarted, isFinished, countdown]);
-    useEffect(() => { return () => clearWaveTimeout(); }, []);
+
+    useEffect(() => {
+        if (gameStarted && timeLeft === 0 && !isFinished) endSession();
+    }, [timeLeft, gameStarted, isFinished, endSession]);
 
     useEffect(() => {
         const canvas = canvasRef.current; if (!canvas) return;
         const ctx = canvas.getContext("2d"); if (!ctx) return;
         ctx.clearRect(0, 0, dimensionsRef.current.width, dimensionsRef.current.height);
-        for (const target of targets) {
-            const gradient = ctx.createRadialGradient(target.x - target.radius * 0.3, target.y - target.radius * 0.3, target.radius * 0.1, target.x, target.y, target.radius);
-            if (target.isCorrect) { gradient.addColorStop(0, "#FFFFFF"); gradient.addColorStop(0.3, "#10B981"); gradient.addColorStop(1, "#064E3B"); }
-            else { gradient.addColorStop(0, "#FFAAAA"); gradient.addColorStop(0.3, "#EF4444"); gradient.addColorStop(1, "#660000"); }
-            ctx.beginPath(); ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2); ctx.fillStyle = gradient;
-            ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 25; ctx.shadowOffsetY = 20; ctx.fill();
-            ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+        for (const t of targets) {
+            const gradient = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, t.radius);
+            if (t.isCorrect) {
+                gradient.addColorStop(0, "#FFFFFF");
+                gradient.addColorStop(0.3, "#10B981");
+                gradient.addColorStop(1, "#064E3B");
+            } else {
+                gradient.addColorStop(0, "#FFAAAA");
+                gradient.addColorStop(0.3, "#EF4444");
+                gradient.addColorStop(1, "#660000");
+            }
+            ctx.beginPath(); ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2); ctx.fillStyle = gradient;
+            ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 20; ctx.fill();
         }
     }, [targets, renderDimensions]);
 
-    const isCountingDown = countdown !== null && countdown > 0;
-
     const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement, MouseEvent>) => {
-        if (!gameStarted || isCountingDown) return;
+        if (!gameStarted || (countdown !== null && countdown > 0)) return;
+
         const canvas = canvasRef.current; if (!canvas) return;
         const { x, y } = getScaledCanvasCoordinates(event, canvas, dimensionsRef.current.width, dimensionsRef.current.height);
+
         let clicked = null;
-        for (const t of targets) { if (isPointInsideTarget(x, y, t.x, t.y, t.radius)) { clicked = t; break; } }
-        if (!clicked) { setMisses((p) => p + 1); setScore((p) => Math.max(0, p - config.missPenalty)); return; }
-        if (clicked.isCorrect) { const reaction = performance.now() - clicked.spawnedAt; setHits((p) => p + 1); setScore((p) => p + config.scorePerHit); setReactionTimes((p) => [...p, reaction]); spawnWave(); return; }
-        setMisses((p) => p + 1); setScore((p) => Math.max(0, p - config.missPenalty));
+        for (const t of targets) {
+            if (isPointInsideTarget(x, y, t.x, t.y, t.radius)) {
+                // BUG FIX: Verify the target belongs to the active wave
+                if (t.waveId === activeWaveId.current) {
+                    clicked = t;
+                    break;
+                }
+            }
+        }
+
+        if (!clicked) {
+            setMisses((p) => p + 1);
+            setScore((p) => Math.max(0, p - config.missPenalty));
+            return;
+        }
+
+        if (clicked.isCorrect) {
+            activeWaveId.current = 0; // Lock wave immediately
+            const reaction = performance.now() - clicked.spawnedAt;
+            setHits((p) => p + 1);
+            setScore((p) => p + config.scorePerHit);
+            setReactionTimes((p) => [...p, reaction]);
+            spawnWave();
+        } else {
+            setMisses((p) => p + 1);
+            setScore((p) => Math.max(0, p - config.missPenalty));
+        }
     };
 
     return (
         <div ref={containerRef} className="relative w-full h-screen flex flex-col bg-[#121212] text-white overflow-hidden">
             {isFinished && result && (<div className="absolute inset-0 z-[100]"><ResultsScreen result={result} onRestart={startGame} onBackToMenu={resetState} /></div>)}
             {!gameStarted && !isFinished && (
-                <>
-                    <div className="absolute inset-0 z-0 pointer-events-none opacity-30 bg-[linear-gradient(to_right,#ffffff0a_1px,transparent_1px),linear-gradient(to_bottom,#ffffff0a_1px,transparent_1px)] bg-[size:32px_32px]"></div>
-                    <div className="relative z-10 w-full h-full flex items-center justify-center p-4 bg-black/50">
-                        <div className="w-full max-w-2xl space-y-8 text-center p-12 border border-white/10 bg-[#121212]/80 rounded-3xl backdrop-blur-xl shadow-2xl">
-                            <div className="space-y-2">
-                                <p className="text-emerald-500 text-sm font-bold tracking-[0.3em] uppercase">AimForge Training</p>
-                                <h2 className="text-5xl font-black tracking-widest uppercase">Target Switch</h2>
-                            </div>
-                            <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-6 justify-center pt-4">
-                                <label className="flex flex-col text-left flex-1"><span className="text-gray-400 text-xs font-bold tracking-wider mb-2">DIFFICULTY</span>
-                                    <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as Difficulty)} className="bg-black/80 border border-white/20 p-4 rounded-xl text-white outline-none cursor-pointer">
-                                        {Object.entries(difficultyLabels).map(([k, l]) => <option key={k} value={k}>{l.toUpperCase()}</option>)}
-                                    </select></label>
-                                <label className="flex flex-col text-left flex-1"><span className="text-gray-400 text-xs font-bold tracking-wider mb-2">DURATION</span>
-                                    <select value={durationSeconds} onChange={(e) => setDurationSeconds(Number(e.target.value))} className="bg-black/80 border border-white/20 p-4 rounded-xl text-white outline-none cursor-pointer">
-                                        {!overrideSettings && <option value={15}>15s (Warmup)</option>}<option value={30}>30s (Standard)</option><option value={60}>60s (Endurance)</option>
-                                    </select></label>
-                            </div>
-                            <button onClick={startGame} className="w-full mt-8 px-12 py-5 bg-white text-[#121212] text-lg font-black tracking-[0.2em] rounded-xl hover:bg-emerald-500 hover:text-white transition-all">INITIALIZE SEQUENCE</button>
+                <div className="relative z-10 w-full h-full flex items-center justify-center p-4 bg-black/50">
+                    <div className="w-full max-w-2xl space-y-8 text-center p-12 border border-white/10 bg-[#121212]/80 rounded-3xl backdrop-blur-xl shadow-2xl">
+                        <div className="space-y-2">
+                            <p className="text-emerald-500 text-sm font-bold tracking-[0.3em] uppercase leading-none mb-1">AimSync Protocol</p>
+                            <h2 className="text-5xl font-black tracking-widest uppercase">Target Switch</h2>
                         </div>
+                        <button onClick={startGame} className="w-full mt-8 px-12 py-5 bg-white text-[#121212] text-lg font-black tracking-[0.2em] rounded-xl hover:bg-emerald-500 hover:text-white transition-all uppercase">Initialize Sequence</button>
                     </div>
-                </>
+                </div>
             )}
             {gameStarted && (
                 <div className="relative flex flex-col w-full h-full z-20">
                     <div className="relative z-30 shrink-0 w-full bg-[#050505]/90 border-b border-white/10 backdrop-blur-sm">
-                        <SessionHUD data={{ mode: "Target Switch", difficulty: difficultyLabels[difficulty], timeLeft, score, hits, misses, accuracy, averageReactionTime, bestReactionTime, extraLines: [{ label: "Timeouts", value: missedByTimeout }] }} />
+                        <SessionHUD data={{ mode: "Target Switch", difficulty: difficultyLabels[difficulty], timeLeft, score, hits, misses, accuracy: calculateAccuracy(hits, misses), averageReactionTime: calculateAverageReactionTime(reactionTimes), bestReactionTime: calculateBestReactionTime(reactionTimes), extraLines: [{ label: "Timeouts", value: missedByTimeout }] }} />
                     </div>
-                    <div className="relative flex-1 w-full overflow-hidden">
-                        <div className="absolute inset-0 z-0 overflow-hidden bg-[#2f3b4c] perspective-[800px]">
-                            <div className="absolute top-[-50%] left-[-50%] w-[200%] h-[200%] bg-[#334155] bg-[linear-gradient(to_right,#00000033_2px,transparent_2px),linear-gradient(to_bottom,#00000033_2px,transparent_2px)] bg-[size:4rem_4rem] origin-center [transform:rotateX(60deg)]"></div>
-                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,#050505_100%)] pointer-events-none"></div>
-                        </div>
-                        <div className="relative z-10 w-full h-full">
-                            <canvas ref={canvasRef} width={renderDimensions.width} height={renderDimensions.height} onClick={handleCanvasClick} className="absolute inset-0 block cursor-crosshair" />
-                        </div>
-                        {isCountingDown && (
+                    <div className="relative flex-1 w-full overflow-hidden bg-[#2f3b4c]">
+                        <canvas ref={canvasRef} width={renderDimensions.width} height={renderDimensions.height} onClick={handleCanvasClick} className="absolute inset-0 block cursor-crosshair" />
+                        {countdown !== null && (
                             <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
-                                <span key={countdown} className="text-[12rem] font-black text-emerald-400 animate-ping leading-none select-none drop-shadow-[0_0_60px_#10B981]">{countdown}</span>
+                                <span className="text-[12rem] font-black text-emerald-400 animate-ping">{countdown}</span>
                             </div>
                         )}
                     </div>

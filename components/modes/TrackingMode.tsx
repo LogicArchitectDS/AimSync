@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import type { GameResult, MovingTarget } from "@/lib/game/types";
 import { difficultyConfig, difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
 import {
@@ -12,22 +13,27 @@ import {
 } from "@/lib/utils/gameMath";
 import { createTrackingTarget, updateTrackingTargetPosition } from "@/lib/utils/targetSpawning";
 import { buildGameResult } from "@/lib/utils/resultBuilder";
-import { updateStatsWithResult } from "@/lib/utils/statsStorage";
+import { updateStatsWithResult } from "@/lib/utils/statsService";
 
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
 
+// Extend target type for atomic tracking
 type TrueTrackingTarget = MovingTarget & { health: number; isBeingTracked: boolean };
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; }
 interface TrackingModeProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
 
 export default function TrackingMode({ overrideSettings, onFinish }: TrackingModeProps = {}) {
+    const { user } = useAuth();
     const containerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
     const animationFrameRef = useRef<number | null>(null);
     const timeoutRef = useRef<number | null>(null);
+
+    // BUG FIX: Atomic ID tracking to synchronize movement and health logic
+    const activeTargetId = useRef<string | null>(null);
     const targetRef = useRef<TrueTrackingTarget | null>(null);
     const mouseRef = useRef({ isFiring: false, x: 0, y: 0 });
 
@@ -38,6 +44,7 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
     const [durationSeconds, setDurationSeconds] = useState<number>(overrideSettings?.duration ?? 30);
     const effectiveDifficulty = overrideSettings?.difficulty ?? difficulty;
     const effectiveDuration = overrideSettings?.duration ?? durationSeconds;
+
     const [gameStarted, setGameStarted] = useState(false);
     const [isFinished, setIsFinished] = useState(false);
     const [timeLeft, setTimeLeft] = useState<number>(30);
@@ -52,24 +59,56 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
     const [result, setResult] = useState<GameResult | null>(null);
 
     const config = difficultyConfig[effectiveDifficulty];
-
     const accuracy = useMemo(() => calculateAccuracy(hits, misses), [hits, misses]);
-    const averageReactionTime = useMemo(() => calculateAverageReactionTime(reactionTimes), [reactionTimes]);
-    const bestReactionTime = useMemo(() => calculateBestReactionTime(reactionTimes), [reactionTimes]);
 
-    const clearAnimation = () => {
+    const clearAnimation = useCallback(() => {
         if (animationFrameRef.current !== null) {
             cancelAnimationFrame(animationFrameRef.current);
             animationFrameRef.current = null;
         }
-    };
+    }, []);
 
-    const clearTargetTimeout = () => {
+    const clearTargetTimeout = useCallback(() => {
         if (timeoutRef.current !== null) {
             window.clearTimeout(timeoutRef.current);
             timeoutRef.current = null;
         }
-    };
+    }, []);
+
+    const spawnTarget = useCallback(() => {
+        clearTargetTimeout();
+        clearAnimation();
+
+        const baseTarget = createTrackingTarget(
+            effectiveDifficulty,
+            dimensionsRef.current.width,
+            dimensionsRef.current.height,
+            config.targetRadius
+        );
+
+        // Generate atomic ID for the tracking target
+        const newId = baseTarget.id;
+        activeTargetId.current = newId;
+
+        targetRef.current = {
+            ...baseTarget,
+            health: 100,
+            isBeingTracked: false
+        };
+
+        setTotalTargetsSpawned((prev) => prev + 1);
+        startTrackingLoop();
+
+        timeoutRef.current = window.setTimeout(() => {
+            // Only timeout if this is still the active ID
+            if (activeTargetId.current === newId) {
+                setMisses((prev) => prev + 1);
+                setMissedByTimeout((prev) => prev + 1);
+                setScore((prev) => Math.max(0, prev - config.missPenalty));
+                spawnTarget();
+            }
+        }, config.targetLifetimeMs + 1000);
+    }, [effectiveDifficulty, config, clearAnimation, clearTargetTimeout]);
 
     const startTrackingLoop = () => {
         clearAnimation();
@@ -93,7 +132,9 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
                     newHealth -= (deltaTime * 0.25);
                 }
 
-                if (newHealth <= 0) {
+                // BUG FIX: Atomic check before kill-respawn
+                if (newHealth <= 0 && targetRef.current.id === activeTargetId.current) {
+                    activeTargetId.current = null; // Invalidate immediately
                     targetRef.current = null;
                     setHits(h => h + 1);
                     setScore(s => s + config.scorePerHit + 50);
@@ -104,17 +145,14 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
                 targetRef.current = {
                     ...nextTarget,
                     health: newHealth,
-                    isBeingTracked: isHit
+                    isBeingTracked: isHit,
+                    id: targetRef.current.id
                 } as TrueTrackingTarget;
 
                 ctx.clearRect(0, 0, dimensionsRef.current.width, dimensionsRef.current.height);
 
                 const t = targetRef.current;
-
-                const gradient = ctx.createRadialGradient(
-                    t.x - t.radius * 0.3, t.y - t.radius * 0.3, t.radius * 0.1,
-                    t.x, t.y, t.radius
-                );
+                const gradient = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, t.radius);
 
                 if (t.isBeingTracked) {
                     gradient.addColorStop(0, "#FFFFFF");
@@ -129,57 +167,22 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
                 ctx.beginPath();
                 ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
                 ctx.fillStyle = gradient;
-                ctx.shadowColor = "rgba(0,0,0,0.6)";
+                ctx.shadowColor = t.isBeingTracked ? "rgba(0, 229, 255, 0.5)" : "rgba(0,0,0,0.6)";
                 ctx.shadowBlur = 25;
-                ctx.shadowOffsetX = 0;
-                ctx.shadowOffsetY = 20;
                 ctx.fill();
-                ctx.shadowColor = "transparent";
-                ctx.shadowBlur = 0;
-                ctx.shadowOffsetX = 0;
-                ctx.shadowOffsetY = 0;
             }
-
             animationFrameRef.current = requestAnimationFrame(tick);
         };
-
         animationFrameRef.current = requestAnimationFrame(tick);
-    };
-
-    const spawnTarget = () => {
-        clearTargetTimeout();
-        clearAnimation();
-
-        const baseTarget = createTrackingTarget(
-            difficulty,
-            dimensionsRef.current.width,
-            dimensionsRef.current.height,
-            config.targetRadius
-        );
-
-        targetRef.current = {
-            ...baseTarget,
-            health: 100,
-            isBeingTracked: false
-        };
-
-        setTotalTargetsSpawned((prev) => prev + 1);
-        startTrackingLoop();
-
-        timeoutRef.current = window.setTimeout(() => {
-            setMisses((prev) => prev + 1);
-            setMissedByTimeout((prev) => prev + 1);
-            setScore((prev) => Math.max(0, prev - config.missPenalty));
-            spawnTarget();
-        }, config.targetLifetimeMs + 1000);
     };
 
     const resetState = () => {
         clearAnimation();
         clearTargetTimeout();
+        activeTargetId.current = null;
         setGameStarted(false);
         setIsFinished(false);
-        setTimeLeft(durationSeconds);
+        setTimeLeft(effectiveDuration);
         setCountdown(null);
         targetRef.current = null;
         mouseRef.current = { isFiring: false, x: 0, y: 0 };
@@ -201,87 +204,50 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
         setCountdown(3);
     };
 
-    const endSession = async () => {
+    const endSession = useCallback(async () => {
         clearAnimation();
         clearTargetTimeout();
+        activeTargetId.current = null;
         setGameStarted(false);
         targetRef.current = null;
 
         const resultData = buildGameResult({
             mode: "Tracking Protocol",
             difficulty: difficultyLabels[effectiveDifficulty],
-            score,
-            hits,
-            misses,
+            score, hits, misses,
             duration: effectiveDuration,
-            reactionTimes,
-            totalTargetsSpawned,
+            reactionTimes, totalTargetsSpawned,
             missedByTimeout,
             extraStats: { "Timeout Misses": missedByTimeout },
         });
 
+        // Push telemetry to Firestore
         updateStatsWithResult(resultData);
 
-        if (document.fullscreenElement) {
-            await document.exitFullscreen().catch(() => { });
-        }
-
-        if (onFinish) {
-            onFinish(resultData);
-        } else {
-            setResult(resultData);
-            setIsFinished(true);
-        }
-    };
-
-    // --- COUNTDOWN EFFECT ---
-    useEffect(() => {
-        if (countdown === null) return;
-        if (countdown === 0) {
-            setCountdown(null);
-            window.setTimeout(() => spawnTarget(), 0);
-            return;
-        }
-        const timer = window.setTimeout(() => setCountdown((c) => (c !== null ? c - 1 : null)), 1000);
-        return () => window.clearTimeout(timer);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [countdown]);
+        if (document.fullscreenElement) await document.exitFullscreen().catch(() => { });
+        if (onFinish) onFinish(resultData);
+        else { setResult(resultData); setIsFinished(true); }
+    }, [hits, misses, score, effectiveDifficulty, effectiveDuration, reactionTimes, totalTargetsSpawned, missedByTimeout, onFinish, clearAnimation, clearTargetTimeout]);
 
     useEffect(() => {
-        if (!gameStarted) return;
-        const updateSize = () => {
-            if (canvasRef.current && canvasRef.current.parentElement) {
-                const { clientWidth, clientHeight } = canvasRef.current.parentElement;
-                dimensionsRef.current = { width: clientWidth, height: clientHeight };
-                setRenderDimensions({ width: clientWidth, height: clientHeight });
-            }
-        };
-        window.addEventListener("resize", updateSize);
-        updateSize();
-        return () => window.removeEventListener("resize", updateSize);
-    }, [gameStarted]);
-
-    useEffect(() => { setTimeLeft(durationSeconds); }, [durationSeconds]);
+        if (countdown === 0) { setCountdown(null); spawnTarget(); }
+        else if (countdown !== null) {
+            const timer = window.setTimeout(() => setCountdown(c => c! - 1), 1000);
+            return () => window.clearTimeout(timer);
+        }
+    }, [countdown, spawnTarget]);
 
     useEffect(() => {
         if (!gameStarted || countdown !== null) return;
-        const timer = window.setInterval(() => {
-            setTimeLeft((prev) => Math.max(0, prev - 1));
-        }, 1000);
+        const timer = window.setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
         return () => window.clearInterval(timer);
     }, [gameStarted, countdown]);
 
     useEffect(() => {
-        if (gameStarted && timeLeft === 0 && !isFinished && countdown === null) endSession();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [timeLeft, gameStarted, isFinished, countdown]);
+        if (gameStarted && timeLeft === 0 && !isFinished) endSession();
+    }, [timeLeft, gameStarted, isFinished, endSession]);
 
-    useEffect(() => {
-        return () => {
-            clearAnimation();
-            clearTargetTimeout();
-        };
-    }, []);
+    useEffect(() => () => { clearAnimation(); clearTargetTimeout(); }, [clearAnimation, clearTargetTimeout]);
 
     const updateMousePosition = (event: React.MouseEvent<HTMLCanvasElement>) => {
         if (!canvasRef.current) return;
@@ -290,106 +256,45 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
         mouseRef.current.y = y;
     };
 
-    const isCountingDown = countdown !== null && countdown > 0;
-
     return (
         <div ref={containerRef} className="relative w-full h-screen flex flex-col bg-[#121212] text-white overflow-hidden">
-
-            {/* --- RESULTS SCREEN --- */}
             {isFinished && result && (
                 <div className="absolute inset-0 z-[100]">
                     <ResultsScreen result={result} onRestart={startGame} onBackToMenu={resetState} />
                 </div>
             )}
 
-            {/* --- PRE-GAME MENU --- */}
             {!gameStarted && !isFinished && (
-                <>
-                    <div className="absolute inset-0 z-0 pointer-events-none opacity-30 bg-[linear-gradient(to_right,#ffffff0a_1px,transparent_1px),linear-gradient(to_bottom,#ffffff0a_1px,transparent_1px)] bg-[size:32px_32px]"></div>
-                    <div className="relative z-10 w-full h-full flex items-center justify-center p-4 bg-black/50">
-                        <div className="w-full max-w-2xl space-y-8 text-center p-12 border border-white/10 bg-[#121212]/80 rounded-3xl backdrop-blur-xl shadow-2xl">
-                            <div className="space-y-2">
-                                <p className="text-[#3366FF] text-sm font-bold tracking-[0.3em] uppercase">AimForge Training</p>
-                                <h2 className="text-5xl font-black tracking-widest uppercase">Continuous Tracking</h2>
-                            </div>
-                            <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-6 justify-center pt-4">
-                                <label className="flex flex-col text-left flex-1">
-                                    <span className="text-gray-400 text-xs font-bold tracking-wider mb-2">DIFFICULTY</span>
-                                    <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as Difficulty)} className="bg-black/80 border border-white/20 p-4 rounded-xl text-white focus:border-[#3366FF] outline-none transition-all cursor-pointer">
-                                        {Object.entries(difficultyLabels).map(([key, label]) => (
-                                            <option key={key} value={key}>{label.toUpperCase()}</option>
-                                        ))}
-                                    </select>
-                                </label>
-                                <label className="flex flex-col text-left flex-1">
-                                    <span className="text-gray-400 text-xs font-bold tracking-wider mb-2">DURATION</span>
-                                    <select value={durationSeconds} onChange={(e) => setDurationSeconds(Number(e.target.value))} className="bg-black/80 border border-white/20 p-4 rounded-xl text-white focus:border-[#3366FF] outline-none transition-all cursor-pointer">
-                                        {!overrideSettings && <option value={15}>15s (Warmup)</option>}
-                                        <option value={30}>30s (Standard)</option>
-                                        <option value={60}>60s (Endurance)</option>
-                                    </select>
-                                </label>
-                            </div>
-                            <button onClick={startGame} className="w-full mt-8 px-12 py-5 bg-white text-[#121212] text-lg font-black tracking-[0.2em] rounded-xl hover:bg-[#3366FF] hover:text-white transition-all">
-                                INITIALIZE SEQUENCE
-                            </button>
-                        </div>
+                <div className="relative z-10 w-full h-full flex items-center justify-center p-4 bg-black/50">
+                    <div className="w-full max-w-2xl text-center p-12 border border-white/10 bg-[#121212]/80 rounded-3xl backdrop-blur-xl shadow-2xl">
+                        <p className="text-[#3366FF] text-sm font-bold tracking-[0.3em] uppercase mb-2">AimSync Protocol</p>
+                        <h2 className="text-5xl font-black tracking-widest uppercase">Tracking Mode</h2>
+                        <button onClick={startGame} className="w-full mt-8 px-12 py-5 bg-white text-[#121212] text-lg font-black tracking-[0.2em] rounded-xl hover:bg-[#3366FF] hover:text-white transition-all uppercase">
+                            Initialize Sequence
+                        </button>
                     </div>
-                </>
+                </div>
             )}
 
-            {/* --- ACTIVE GAME ENVIRONMENT --- */}
             {gameStarted && (
                 <div className="relative flex flex-col w-full h-full z-20">
-
-                    {/* TOP HUD */}
                     <div className="relative z-30 shrink-0 w-full bg-[#050505]/90 border-b border-white/10 backdrop-blur-sm">
-                        <SessionHUD
-                            data={{
-                                mode: "Tracking Protocol",
-                                difficulty: difficultyLabels[difficulty],
-                                timeLeft,
-                                score,
-                                hits,
-                                misses,
-                                accuracy,
-                                averageReactionTime,
-                                bestReactionTime,
-                                extraLines: [{ label: "Timeouts", value: missedByTimeout }],
-                            }}
-                        />
+                        <SessionHUD data={{ mode: "Tracking Protocol", difficulty: difficultyLabels[difficulty], timeLeft, score, hits, misses, accuracy: calculateAccuracy(hits, misses), averageReactionTime: calculateAverageReactionTime(reactionTimes), bestReactionTime: calculateBestReactionTime(reactionTimes) }} />
                     </div>
-
-                    {/* 3D ARENA */}
-                    <div className="relative flex-1 w-full overflow-hidden">
-                        <div className="absolute inset-0 z-0 overflow-hidden bg-[#2f3b4c] perspective-[800px]">
-                            <div className="absolute top-[-50%] left-[-50%] w-[200%] h-[200%] bg-[#334155] bg-[linear-gradient(to_right,#00000033_2px,transparent_2px),linear-gradient(to_bottom,#00000033_2px,transparent_2px)] bg-[size:4rem_4rem] origin-center [transform:rotateX(60deg)]"></div>
-                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,#050505_100%)] pointer-events-none"></div>
-                        </div>
-
-                        <div className="relative z-10 w-full h-full">
-                            <canvas
-                                ref={canvasRef}
-                                width={renderDimensions.width}
-                                height={renderDimensions.height}
-                                onMouseDown={(e) => {
-                                    if (isCountingDown) return;
-                                    mouseRef.current.isFiring = true;
-                                    updateMousePosition(e);
-                                }}
-                                onMouseUp={() => { mouseRef.current.isFiring = false; }}
-                                onMouseMove={updateMousePosition}
-                                onMouseLeave={() => { mouseRef.current.isFiring = false; }}
-                                className="absolute inset-0 block cursor-crosshair"
-                            />
-                        </div>
-
-                        {/* COUNTDOWN OVERLAY */}
-                        {isCountingDown && (
-                            <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
-                                <span key={countdown} className="text-[12rem] font-black text-[#3366FF] animate-ping leading-none select-none drop-shadow-[0_0_60px_#3366FF]">
-                                    {countdown}
-                                </span>
+                    <div className="relative flex-1 w-full overflow-hidden bg-[#2f3b4c]">
+                        <canvas
+                            ref={canvasRef}
+                            width={renderDimensions.width}
+                            height={renderDimensions.height}
+                            onMouseDown={(e) => { if (!countdown) { mouseRef.current.isFiring = true; updateMousePosition(e); } }}
+                            onMouseUp={() => { mouseRef.current.isFiring = false; }}
+                            onMouseMove={updateMousePosition}
+                            onMouseLeave={() => { mouseRef.current.isFiring = false; }}
+                            className="absolute inset-0 block cursor-crosshair"
+                        />
+                        {countdown !== null && (
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                <span className="text-[12rem] font-black text-[#3366FF] animate-ping">{countdown}</span>
                             </div>
                         )}
                     </div>
