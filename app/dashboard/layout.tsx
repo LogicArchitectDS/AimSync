@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { StorageEngine } from "@/lib/utils/storage";
+import { useAuth } from "@/lib/contexts/AuthContext";
 import type { UserStats } from "@/lib/game/types";
 
 function DashboardBackground() {
@@ -46,6 +47,7 @@ function getRankInfo(stats: UserStats) {
 function DashboardHeader() {
     const pathname = usePathname();
     const [stats, setStats] = useState<UserStats | null>(null);
+    const { user, isTrial } = useAuth();
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -101,15 +103,21 @@ function DashboardHeader() {
             </div>
             
             <div className="flex items-center gap-6">
-                <Link href="/dashboard/profile" className="flex items-center gap-3 group">
+                <Link href={isTrial ? "#" : "/auth/setup-username"} className="flex items-center gap-3 group">
                     <div className="flex flex-col items-end hidden md:flex">
-                        <span className="text-xs font-black text-white uppercase tracking-widest leading-none mb-1 group-hover:text-red transition-colors">Agent_01</span>
+                        <span className="text-xs font-black text-white tracking-widest leading-none mb-1 group-hover:text-red transition-colors">
+                            {isTrial ? "Trial Agent" : (user?.username || "Agent_01")}
+                        </span>
                         <span className="text-[10px] text-red font-bold uppercase tracking-widest leading-none">Global Rank: {rankInfo.tier}</span>
                     </div>
                     <div className="w-10 h-10 rounded-full bg-surface border border-white/20 flex items-center justify-center overflow-hidden group-hover:border-red transition-colors shadow-[0_0_15px_rgba(239,68,68,0.1)] cursor-pointer">
-                        <svg className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
+                        {user?.profilePhoto ? (
+                            <img src={user.profilePhoto} alt="Avatar" className="w-full h-full object-cover" />
+                        ) : (
+                            <svg className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                        )}
                     </div>
                 </Link>
             </div>
@@ -118,6 +126,7 @@ function DashboardHeader() {
 }
 
 function DashboardFooter() {
+    const { logout } = useAuth();
     return (
         <footer className="relative z-10 w-full mt-auto py-4 px-8 flex flex-col md:flex-row items-center justify-between gap-4 text-[10px] text-slate-500 font-black tracking-[0.2em] uppercase border-t border-white/5 bg-surface/40 backdrop-blur-md">
             <div className="flex items-center gap-6">
@@ -142,12 +151,15 @@ function DashboardFooter() {
                     <span className="text-emerald-400 font-mono tracking-widest">12MS</span>
                 </div>
                 <div className="w-px h-3 bg-white/10" />
-                <Link href="/" className="text-slate-400 hover:text-red transition-colors flex items-center gap-2 group">
+                <button 
+                    onClick={logout}
+                    className="text-slate-400 hover:text-red transition-colors flex items-center gap-2 group uppercase"
+                >
                     <span>Terminate Session</span>
                     <svg className="w-3 h-3 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                     </svg>
-                </Link>
+                </button>
             </div>
         </footer>
     );

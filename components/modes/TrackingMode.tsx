@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GameResult, MovingTarget } from "@/lib/game/types";
-import { difficultyConfig, difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
+import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
 import {
     calculateAccuracy,
     calculateAverageReactionTime,
@@ -28,6 +28,8 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
 
     const animationFrameRef = useRef<number | null>(null);
     const timeoutRef = useRef<number | null>(null);
+    const sessionIdxRef = useRef(0);
+    const sessionStartRef = useRef<number>(0);
     const targetRef = useRef<TrueTrackingTarget | null>(null);
     const mouseRef = useRef({ isFiring: false, x: 0, y: 0 });
 
@@ -149,12 +151,15 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
     const spawnTarget = () => {
         clearTargetTimeout();
         clearAnimation();
+        const currentSession = sessionIdxRef.current;
+        const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
+        const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, effectiveDuration);
 
         const baseTarget = createTrackingTarget(
             difficulty,
             dimensionsRef.current.width,
             dimensionsRef.current.height,
-            config.targetRadius
+            radius
         );
 
         targetRef.current = {
@@ -167,6 +172,7 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
         startTrackingLoop();
 
         timeoutRef.current = window.setTimeout(() => {
+            if (sessionIdxRef.current !== currentSession) return;
             setMisses((prev) => prev + 1);
             setMissedByTimeout((prev) => prev + 1);
             setScore((prev) => Math.max(0, prev - config.missPenalty));
@@ -175,6 +181,7 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
     };
 
     const resetState = () => {
+        sessionIdxRef.current++;
         clearAnimation();
         clearTargetTimeout();
         setGameStarted(false);
@@ -239,7 +246,8 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
         if (countdown === null) return;
         if (countdown === 0) {
             setCountdown(null);
-            window.setTimeout(() => spawnTarget(), 0);
+            sessionStartRef.current = performance.now();
+            spawnTarget();
             return;
         }
         const timer = window.setTimeout(() => setCountdown((c) => (c !== null ? c - 1 : null)), 1000);

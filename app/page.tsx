@@ -208,7 +208,7 @@ export default function Home() {
           {/* Right side: sign in */}
           <div className="flex items-center gap-4">
             <Link
-              href="/dashboard"
+              href="/auth/login"
               className="text-slate-300 px-5 py-2 text-sm font-bold uppercase tracking-widest hover:text-white transition-all duration-200"
             >
               Login

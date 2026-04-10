@@ -41,3 +41,44 @@ export const difficultyConfig: Record<Difficulty, DifficultySettings> = {
         missPenalty: 45,
     },
 };
+
+// ─────────────────────────────────────────────────────────────
+//  Dynamic Target Scaling
+//  Targets shrink linearly from 100% → (100 - maxReduction)%
+//  over the full session duration.
+//
+//  Max reductions by difficulty:
+//    easy    (eco)       → 40%
+//    medium  (bonus)     → 50%
+//    hard    (force-buy) → 60%
+//    extreme (full-buy)  → 70%
+// ─────────────────────────────────────────────────────────────
+const MAX_REDUCTION: Record<Difficulty, number> = {
+    easy:    0.40,
+    medium:  0.50,
+    hard:    0.60,
+    extreme: 0.70,
+};
+
+/**
+ * Returns the radius that should be used for the *next* target spawn,
+ * scaled down based on how far through the session we are.
+ *
+ * @param baseRadius   - The full-size radius for this difficulty (px).
+ * @param difficulty   - Current difficulty key.
+ * @param elapsedSec   - Seconds elapsed since the session started.
+ * @param durationSec  - Total session duration in seconds.
+ * @param minRadius    - Hard floor so targets never become invisible (default 6px).
+ */
+export const getScaledRadius = (
+    baseRadius: number,
+    difficulty: Difficulty,
+    elapsedSec: number,
+    durationSec: number,
+    minRadius = 6,
+): number => {
+    if (durationSec <= 0) return baseRadius;
+    const progress = Math.min(1, Math.max(0, elapsedSec / durationSec));
+    const scaleFactor = 1 - MAX_REDUCTION[difficulty] * progress;
+    return Math.max(minRadius, Math.round(baseRadius * scaleFactor));
+};

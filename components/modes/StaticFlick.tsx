@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BaseTarget, GameResult } from "@/lib/game/types";
-import { difficultyConfig, difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
+import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
 import {
     calculateAccuracy,
     calculateAverageReactionTime,
@@ -16,6 +16,7 @@ import { updateStatsWithResult } from "@/lib/utils/statsStorage";
 
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
+import { useAuth } from "@/lib/contexts/AuthContext";
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; }
 interface StaticFlickProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
@@ -23,10 +24,14 @@ interface StaticFlickProps { overrideSettings?: OverrideSettings; onFinish?: (re
 export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickProps = {}) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const timeoutRef = useRef<number | null>(null);
+    const timeoutRef        = useRef<number | null>(null);
+    const sessionIdxRef     = useRef(0);
+    const sessionStartRef   = useRef<number>(0);
 
     const dimensionsRef = useRef({ width: 1600, height: 900 });
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
+
+    const { isTrial } = useAuth();
 
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
     const [durationSeconds, setDurationSeconds] = useState<number>(overrideSettings?.duration ?? 30);
@@ -61,11 +66,21 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
 
     const spawnTarget = () => {
         clearTargetTimeout();
-        const nextTarget = createStaticTarget(dimensionsRef.current.width, dimensionsRef.current.height, config.targetRadius);
+        // The session index acts as a global kill-switch for all callbacks
+        const currentSession = sessionIdxRef.current;
+        const myId = Date.now() + Math.random(); // Unique ID for this specific target lifecycle
+        
+        const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
+        const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, effectiveDuration);
+        const nextTarget = createStaticTarget(dimensionsRef.current.width, dimensionsRef.current.height, radius);
+        
         setTarget(nextTarget);
         setTotalTargetsSpawned((prev) => prev + 1);
 
         timeoutRef.current = window.setTimeout(() => {
+            // Guard: If session changed or another target took over, abort
+            if (sessionIdxRef.current !== currentSession) return;
+            
             setMisses((prev) => prev + 1);
             setMissedByTimeout((prev) => prev + 1);
             setScore((prev) => Math.max(0, prev - config.missPenalty));
@@ -74,8 +89,10 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
     };
 
     const resetState = () => {
+        sessionIdxRef.current++; // Invalidate all pending timeouts immediately
         clearTargetTimeout();
         setGameStarted(false);
+        // ... rest of resetState ...
         setIsFinished(false);
         setTimeLeft(durationSeconds);
         setCountdown(null);
@@ -92,6 +109,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
     const startGame = async () => {
         resetState();
         setGameStarted(true);
+        sessionStartRef.current = performance.now();
         if (containerRef.current && !document.fullscreenElement) {
             await containerRef.current.requestFullscreen().catch(() => { });
         }
@@ -135,7 +153,8 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
         if (countdown === null) return;
         if (countdown === 0) {
             setCountdown(null);
-            window.setTimeout(() => spawnTarget(), 0);
+            // Ensure we only spawn if we haven't already started a session
+            spawnTarget();
             return;
         }
         const timer = window.setTimeout(() => setCountdown((c) => (c !== null ? c - 1 : null)), 1000);
@@ -257,17 +276,24 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
                                 <label className="flex flex-col text-left flex-1">
                                     <span className="text-gray-400 text-xs font-bold tracking-wider mb-2">DIFFICULTY</span>
                                     <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as Difficulty)} className="bg-black/80 border border-white/20 p-4 rounded-xl text-white focus:border-[#3366FF] outline-none transition-all cursor-pointer">
-                                        {Object.entries(difficultyLabels).map(([key, label]) => (
-                                            <option key={key} value={key}>{label.toUpperCase()}</option>
-                                        ))}
+                                        {Object.entries(difficultyLabels).map(([key, label]) => {
+                                            const isLocked = isTrial && key !== "eco" && key !== "bonus";
+                                            return (
+                                                <option key={key} value={key} disabled={isLocked}>
+                                                    {label.toUpperCase()}
+                                                </option>
+                                            );
+                                        })}
                                     </select>
                                 </label>
                                 <label className="flex flex-col text-left flex-1">
                                     <span className="text-gray-400 text-xs font-bold tracking-wider mb-2">DURATION</span>
                                     <select value={durationSeconds} onChange={(e) => setDurationSeconds(Number(e.target.value))} className="bg-black/80 border border-white/20 p-4 rounded-xl text-white focus:border-[#3366FF] outline-none transition-all cursor-pointer">
-                                        {!overrideSettings && <option value={15}>15s (Warmup)</option>}
+                                        {!overrideSettings && (
+                                            <option value={15} disabled={isTrial}>15s (Warmup)</option>
+                                        )}
                                         <option value={30}>30s (Standard)</option>
-                                        <option value={60}>60s (Endurance)</option>
+                                        <option value={60} disabled={isTrial}>60s (Endurance)</option>
                                     </select>
                                 </label>
                             </div>

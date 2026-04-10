@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GameResult, MovingTarget } from "@/lib/game/types";
-import { difficultyConfig, difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
+import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
 import {
     calculateAccuracy,
     calculateAverageReactionTime,
@@ -34,6 +34,8 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
     const canvasRef          = useRef<HTMLCanvasElement | null>(null);
     const animationFrameRef  = useRef<number | null>(null);
     const timeoutRef         = useRef<number | null>(null);
+    const sessionIdxRef      = useRef(0);
+    const sessionStartRef    = useRef<number>(0);
     const targetRef          = useRef<TrueTrackingTarget | null>(null);
     const mouseRef           = useRef({ isFiring: false, x: 0, y: 0 });
     const dimensionsRef      = useRef({ width: 1600, height: 900 });
@@ -152,12 +154,15 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
     const spawnTarget = () => {
         clearTargetTimeout();
         clearAnimation();
+        const currentSession = sessionIdxRef.current;
+        const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
+        const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, effectiveDuration);
 
         const baseTarget = createTrackingTarget(
             effectiveDifficulty,
             dimensionsRef.current.width,
             dimensionsRef.current.height,
-            config.targetRadius
+            radius
         );
 
         targetRef.current = { ...baseTarget, health: 100, isBeingTracked: false };
@@ -165,6 +170,7 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
         startTrackingLoop();
 
         timeoutRef.current = window.setTimeout(() => {
+            if (sessionIdxRef.current !== currentSession) return;
             setMisses(p => p + 1);
             setMissedByTimeout(p => p + 1);
             setScore(p => Math.max(0, p - config.missPenalty));
@@ -173,6 +179,7 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
     };
 
     const resetState = () => {
+        sessionIdxRef.current++;
         clearAnimation();
         clearTargetTimeout();
         setGameStarted(false);
@@ -284,7 +291,8 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
         if (countdown === null) return;
         if (countdown === 0) {
             setCountdown(null);
-            window.setTimeout(() => spawnTarget(), 0);
+            sessionStartRef.current = performance.now();
+            spawnTarget();
             return;
         }
         const t = window.setTimeout(() => setCountdown(c => (c !== null ? c - 1 : null)), 1000);

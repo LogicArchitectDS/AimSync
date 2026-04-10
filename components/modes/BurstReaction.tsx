@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BaseTarget, GameResult } from "@/lib/game/types";
-import { difficultyConfig, difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
+import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
 import { calculateAccuracy, calculateAverageReactionTime, calculateBestReactionTime, getScaledCanvasCoordinates, isPointInsideTarget } from "@/lib/utils/gameMath";
 import { createBurstTarget, getBurstSize } from "@/lib/utils/targetSpawning";
 import { buildGameResult } from "@/lib/utils/resultBuilder";
@@ -18,6 +18,8 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const animationFrameRef = useRef<number | null>(null);
     const timeoutRef = useRef<number | null>(null);
+    const sessionIdxRef = useRef(0);
+    const sessionStartRef = useRef<number>(0);
     const targetsRef = useRef<BaseTarget[]>([]);
     const dimensionsRef = useRef({ width: 1600, height: 900 });
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
@@ -69,13 +71,17 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
 
     const spawnCluster = () => {
         if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+        const currentSession = sessionIdxRef.current;
+        const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
+        const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, effectiveDuration);
+        
         const clusterSize = getBurstSize(difficulty) || 3;
         const newCluster: BaseTarget[] = [];
         for (let i = 0; i < clusterSize; i++) {
-            let next = createBurstTarget(dimensionsRef.current.width, dimensionsRef.current.height, config.targetRadius);
+            let next = createBurstTarget(dimensionsRef.current.width, dimensionsRef.current.height, radius);
             let attempts = 0;
-            while (newCluster.some((t) => Math.hypot(t.x - next.x, t.y - next.y) < config.targetRadius * 2.5) && attempts < 15) {
-                next = createBurstTarget(dimensionsRef.current.width, dimensionsRef.current.height, config.targetRadius);
+            while (newCluster.some((t) => Math.hypot(t.x - next.x, t.y - next.y) < radius * 2.5) && attempts < 15) {
+                next = createBurstTarget(dimensionsRef.current.width, dimensionsRef.current.height, radius);
                 attempts++;
             }
             newCluster.push(next);
@@ -83,15 +89,27 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
         targetsRef.current = newCluster;
         setTotalTargetsSpawned((prev) => prev + clusterSize);
         const clusterLifetime = Math.max(800, config.targetLifetimeMs * 1.5);
+        
         timeoutRef.current = window.setTimeout(() => {
+            if (sessionIdxRef.current !== currentSession) return;
             const remaining = targetsRef.current.length;
-            if (remaining > 0) { setMisses((p) => p + remaining); setMissedByTimeout((p) => p + remaining); setCombo(0); setScore((p) => Math.max(0, p - config.missPenalty * remaining)); }
+            if (remaining > 0) { 
+                setMisses((p) => p + remaining); 
+                setMissedByTimeout((p) => p + remaining); 
+                setCombo(0); 
+                setScore((p) => Math.max(0, p - config.missPenalty * remaining)); 
+            }
             targetsRef.current = [];
-            window.setTimeout(() => spawnCluster(), 320);
+            
+            window.setTimeout(() => {
+                if (sessionIdxRef.current !== currentSession) return;
+                spawnCluster();
+            }, 320);
         }, clusterLifetime);
     };
 
     const resetState = () => {
+        sessionIdxRef.current++;
         clearEngineTimers();
         setGameStarted(false); setIsFinished(false); setTimeLeft(effectiveDuration); setCountdown(null);
         targetsRef.current = []; setCombo(0); setScore(0); setHits(0); setMisses(0);
@@ -118,7 +136,12 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
 
     useEffect(() => {
         if (countdown === null) return;
-        if (countdown === 0) { setCountdown(null); window.setTimeout(() => spawnCluster(), 0); return; }
+        if (countdown === 0) { 
+            setCountdown(null); 
+            sessionStartRef.current = performance.now();
+            spawnCluster(); 
+            return; 
+        }
         const timer = window.setTimeout(() => setCountdown((c) => (c !== null ? c - 1 : null)), 1000);
         return () => window.clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps

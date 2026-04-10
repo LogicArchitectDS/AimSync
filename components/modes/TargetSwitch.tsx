@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GameResult, SwitchTarget } from "@/lib/game/types";
-import { difficultyConfig, difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
+import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
 import { calculateAccuracy, calculateAverageReactionTime, calculateBestReactionTime, getScaledCanvasCoordinates, isPointInsideTarget } from "@/lib/utils/gameMath";
 import { createTargetSwitchWave } from "@/lib/utils/targetSpawning";
 import { buildGameResult } from "@/lib/utils/resultBuilder";
@@ -16,7 +16,9 @@ interface TargetSwitchProps { overrideSettings?: OverrideSettings; onFinish?: (r
 export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitchProps = {}) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const timeoutRef = useRef<number | null>(null);
+    const timeoutRef    = useRef<number | null>(null);
+    const sessionIdxRef     = useRef(0);
+    const sessionStartRef = useRef<number>(0);
     const dimensionsRef = useRef({ width: 1600, height: 900 });
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
@@ -44,10 +46,14 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
 
     const spawnWave = () => {
         clearWaveTimeout();
-        const wave = createTargetSwitchWave(difficulty, dimensionsRef.current.width, dimensionsRef.current.height, config.targetRadius);
+        const currentSession = sessionIdxRef.current;
+        const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
+        const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, effectiveDuration);
+        const wave = createTargetSwitchWave(difficulty, dimensionsRef.current.width, dimensionsRef.current.height, radius);
         setTargets(wave);
         setTotalTargetsSpawned((prev) => prev + wave.length);
         timeoutRef.current = window.setTimeout(() => {
+            if (sessionIdxRef.current !== currentSession) return;
             setMisses((prev) => prev + 1);
             setMissedByTimeout((prev) => prev + 1);
             setScore((prev) => Math.max(0, prev - config.missPenalty));
@@ -56,6 +62,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
     };
 
     const resetState = () => {
+        sessionIdxRef.current++;
         clearWaveTimeout();
         setGameStarted(false); setIsFinished(false);        setTimeLeft(effectiveDuration); setCountdown(null);
         setTargets([]); setScore(0); setHits(0); setMisses(0); setReactionTimes([]);
@@ -83,7 +90,12 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
 
     useEffect(() => {
         if (countdown === null) return;
-        if (countdown === 0) { setCountdown(null); window.setTimeout(() => spawnWave(), 0); return; }
+        if (countdown === 0) { 
+            setCountdown(null); 
+            sessionStartRef.current = performance.now();
+            spawnWave(); 
+            return; 
+        }
         const timer = window.setTimeout(() => setCountdown((c) => (c !== null ? c - 1 : null)), 1000);
         return () => window.clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BaseTarget, GameResult } from "@/lib/game/types";
-import { difficultyConfig, difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
+import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
 import {
     calculateAccuracy,
     calculateAverageReactionTime,
@@ -33,6 +33,8 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
     const containerRef  = useRef<HTMLDivElement | null>(null);
     const canvasRef     = useRef<HTMLCanvasElement | null>(null);
     const timeoutRef    = useRef<number | null>(null);
+    const sessionIdxRef     = useRef(0);
+    const sessionStartRef = useRef<number>(0);
     const dimensionsRef = useRef({ width: 1600, height: 900 });
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
 
@@ -67,6 +69,7 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
     //  PRE_MENU → Initialize button → COUNTDOWN
     // ─────────────────────────────────────────────────────────
     const handleInitialize = async () => {
+        sessionIdxRef.current++; // Kill switch for any lingering loops
         if (containerRef.current && !document.fullscreenElement) {
             await containerRef.current.requestFullscreen().catch(() => {});
         }
@@ -80,8 +83,9 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
     useEffect(() => {
         if (phase !== "COUNTDOWN") return;
         if (countdown === 0) {
+            sessionStartRef.current = performance.now();
             setPhase("ACTIVE");
-            window.setTimeout(() => spawnTarget(), 0);
+            spawnTarget();
             return;
         }
         const t = window.setTimeout(() => setCountdown(c => c - 1), 1000);
@@ -174,15 +178,20 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
 
     const spawnTarget = () => {
         clearTargetTimeout();
+        const currentSession = sessionIdxRef.current;
+        
+        const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
+        const radius = getScaledRadius(benchmarkConfig.targetRadius, difficulty, elapsedSec, BENCHMARK_DURATION);
         const next = createStaticTarget(
             dimensionsRef.current.width,
             dimensionsRef.current.height,
-            benchmarkConfig.targetRadius
+            radius
         );
         setTarget(next);
         setTotalTargetsSpawned(p => p + 1);
 
         timeoutRef.current = window.setTimeout(() => {
+            if (sessionIdxRef.current !== currentSession) return;
             setMisses(p => p + 1);
             setMissedByTimeout(p => p + 1);
             setScore(p => Math.max(0, p - benchmarkConfig.missPenalty));
@@ -287,6 +296,7 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
     };
 
     const handleRestart = () => {
+        sessionIdxRef.current++; // Invalidate stale timeouts
         clearTargetTimeout();
         setPhase("PRE_MENU");
         setCountdown(3);

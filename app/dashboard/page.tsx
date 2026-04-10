@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { StorageEngine } from "@/lib/utils/storage";
+import { useAuth } from "@/lib/contexts/AuthContext";
 import type { UserStats } from "@/lib/game/types";
 import { protocolCards } from "../game/page";
 
@@ -131,6 +132,7 @@ function getRankInfo(stats: UserStats) {
 export default function Dashboard() {
     const [stats, setStats] = useState<UserStats | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const { user, isTrial, logout } = useAuth();
     const router = useRouter();
 
     useEffect(() => {
@@ -193,14 +195,31 @@ export default function Dashboard() {
                     <div className="bg-surface/60 border border-white/10 rounded-xl p-6 backdrop-blur-md flex flex-col items-center text-center">
                         <div className="relative w-24 h-24 mb-4">
                             <div className="absolute inset-0 rounded-full border-4 border-surface shadow-[0_0_15px_rgba(0,0,0,0.5)] z-10"></div>
-                            <div className="w-full h-full rounded-full bg-black flex items-center justify-center relative z-0 border-2" style={{ borderColor: rankInfo.glow }}>
-                                <span className={`text-4xl font-black ${rankInfo.color}`} style={{ textShadow: `0 0 20px ${rankInfo.glow}` }}>{rankInfo.tier.charAt(0)}</span>
+                            <div className="w-full h-full rounded-full bg-black flex items-center justify-center relative z-0 border-2 overflow-hidden" style={{ borderColor: rankInfo.glow }}>
+                                {user?.profilePhoto ? (
+                                    <img src={user.profilePhoto} alt="Avatar" className="w-full h-full object-cover" />
+                                ) : (
+                                    <span className={`text-4xl font-black ${rankInfo.color}`} style={{ textShadow: `0 0 20px ${rankInfo.glow}` }}>
+                                        {isTrial ? "T" : (user?.username?.charAt(0) || rankInfo.tier.charAt(0))}
+                                    </span>
+                                )}
                             </div>
                         </div>
-                        <h2 className="text-xl font-black uppercase tracking-widest text-white mb-1">Agent_01</h2>
-                        <p className={`text-xs font-bold uppercase tracking-[0.2em] ${rankInfo.color} mb-6`}>{rankInfo.tier}</p>
+                        <h2 className="text-xl font-black tracking-widest text-white mb-1">
+                            {isTrial ? "Trial Agent" : (user?.username || "Agent_01")}
+                        </h2>
+                        <p className={`text-xs font-bold uppercase tracking-[0.2em] ${rankInfo.color} mb-6`}>
+                            {isTrial ? "Guest Protocol" : rankInfo.tier}
+                        </p>
                         
-                        <div className="w-full h-px bg-white/5 mb-6" />
+                        <div className="w-full h-px bg-white/5 mb-4" />
+                        
+                        <button 
+                            onClick={logout}
+                            className="w-full py-2 mb-6 border border-white/5 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-white hover:bg-red transition-all"
+                        >
+                            Sign Out Terminal
+                        </button>
                         
                         <div className="w-full grid grid-cols-2 gap-4 text-left">
                             <div>
@@ -253,12 +272,13 @@ export default function Dashboard() {
                             {protocolCards.map((card) => {
                                 const mStats = stats.modes[card.id];
                                 const played = mStats && mStats.gamesPlayed > 0;
+                                const isLocked = isTrial && card.id !== "static-flick" && card.id !== "micro-adjust";
                                 
                                 return (
-                                    <div key={card.id} className="grid grid-cols-12 gap-4 items-center p-4 rounded-lg bg-black/30 hover:bg-white/5 border border-white/5 transition-colors group">
+                                    <div key={card.id} className={`grid grid-cols-12 gap-4 items-center p-4 rounded-lg bg-black/30 border border-white/5 transition-colors group ${isLocked ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/5'}`}>
                                         {/* Name */}
-                                        <div className="col-span-5 flex flex-col">
-                                            <span className="text-sm font-bold text-white group-hover:text-red transition-colors">{card.title}</span>
+                                        <div className="col-span-4 flex flex-col">
+                                            <span className={`text-sm font-bold transition-colors ${isLocked ? 'text-slate-500' : 'text-white group-hover:text-red'}`}>{card.title}</span>
                                             <span className="text-[10px] text-slate-500 truncate mt-1 pr-4">{card.desc}</span>
                                         </div>
                                         
@@ -266,7 +286,7 @@ export default function Dashboard() {
                                         <div className="col-span-2 flex justify-center">
                                             <span 
                                                 className="px-2 py-1 rounded text-[9px] font-black tracking-widest uppercase border"
-                                                style={{ color: card.color, borderColor: `${card.color}40`, backgroundColor: `${card.color}10` }}
+                                                style={{ color: isLocked ? '#475569' : card.color, borderColor: isLocked ? '#1e293b' : `${card.color}40`, backgroundColor: isLocked ? 'transparent' : `${card.color}10` }}
                                             >
                                                 {card.category}
                                             </span>
@@ -274,7 +294,7 @@ export default function Dashboard() {
                                         
                                         {/* High Score */}
                                         <div className="col-span-2 text-right">
-                                            {played ? (
+                                            {played && !isLocked ? (
                                                 <span className="font-mono font-bold text-white">{Math.round(mStats.highScore).toLocaleString()}</span>
                                             ) : (
                                                 <span className="font-mono text-slate-600">-</span>
@@ -283,7 +303,7 @@ export default function Dashboard() {
 
                                         {/* Acc */}
                                         <div className="col-span-2 text-right">
-                                            {played ? (
+                                            {played && !isLocked ? (
                                                 <span className="font-mono font-bold text-emerald-400">{mStats.averageAccuracy.toFixed(1)}%</span>
                                             ) : (
                                                 <span className="font-mono text-slate-600">-</span>
@@ -291,15 +311,19 @@ export default function Dashboard() {
                                         </div>
 
                                         {/* Play Button */}
-                                        <div className="col-span-1 flex justify-end">
-                                            <button 
-                                                onClick={() => router.push(`/game?mode=${card.id}`)}
-                                                className="w-8 h-8 rounded bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 group-hover:bg-red group-hover:text-white group-hover:border-red transition-all"
-                                            >
-                                                <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                                                    <path d="M8 5v14l11-7z" />
-                                                </svg>
-                                            </button>
+                                        <div className="col-span-2 flex justify-end items-center gap-3">
+                                            {isLocked ? (
+                                                <span className="text-[9px] font-black text-red bg-red/10 border border-red/20 px-2 py-1 rounded uppercase tracking-[0.2em]">Restricted</span>
+                                            ) : (
+                                                <button 
+                                                    onClick={() => router.push(`/game?mode=${card.id}`)}
+                                                    className="w-8 h-8 rounded bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 group-hover:bg-red group-hover:text-white group-hover:border-red transition-all"
+                                                >
+                                                    <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                                                        <path d="M8 5v14l11-7z" />
+                                                    </svg>
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 );

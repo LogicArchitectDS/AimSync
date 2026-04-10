@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BaseTarget, GameResult } from "@/lib/game/types";
-import { difficultyConfig, difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
+import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
 import {
     calculateAccuracy,
     calculateAverageReactionTime,
@@ -16,6 +16,7 @@ import { updateStatsWithResult } from "@/lib/utils/statsStorage";
 
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
+import { useAuth } from "@/lib/contexts/AuthContext";
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; }
 interface MicroAdjustProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
@@ -26,6 +27,8 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
 
     const animationFrameRef = useRef<number | null>(null);
     const timeoutRef = useRef<number | null>(null);
+    const sessionIdxRef = useRef(0);
+    const sessionStartRef = useRef<number>(0);
     const targetRef = useRef<BaseTarget | null>(null);
 
     const dimensionsRef = useRef({ width: 1600, height: 900 });
@@ -54,6 +57,8 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
     const accuracy = useMemo(() => calculateAccuracy(hits, misses), [hits, misses]);
     const averageReactionTime = useMemo(() => calculateAverageReactionTime(reactionTimes), [reactionTimes]);
     const bestReactionTime = useMemo(() => calculateBestReactionTime(reactionTimes), [reactionTimes]);
+
+    const { isTrial } = useAuth();
 
     const clearEngineTimers = () => {
         if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
@@ -101,14 +106,18 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
 
     const spawnTarget = () => {
         if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+        const currentSession = sessionIdxRef.current;
 
         const currentX = targetRef.current?.x;
         const currentY = targetRef.current?.y;
 
+        const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
+        const currentRadius = getScaledRadius(microRadius, effectiveDifficulty, elapsedSec, effectiveDuration);
+
         const nextTarget = createMicroAdjustTarget(
             dimensionsRef.current.width,
             dimensionsRef.current.height,
-            microRadius,
+            currentRadius,
             currentX,
             currentY
         );
@@ -117,6 +126,7 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
         setTotalTargetsSpawned((prev) => prev + 1);
 
         timeoutRef.current = window.setTimeout(() => {
+            if (sessionIdxRef.current !== currentSession) return;
             setMisses((prev) => prev + 1);
             setMissedByTimeout((prev) => prev + 1);
             setScore((prev) => Math.max(0, prev - config.missPenalty));
@@ -125,6 +135,7 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
     };
 
     const resetState = () => {
+        sessionIdxRef.current++;
         clearEngineTimers();
         setGameStarted(false);
         setIsFinished(false);
@@ -187,7 +198,8 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
         if (countdown === null) return;
         if (countdown === 0) {
             setCountdown(null);
-            window.setTimeout(() => spawnTarget(), 0);
+            sessionStartRef.current = performance.now();
+            spawnTarget();
             return;
         }
         const timer = window.setTimeout(() => setCountdown((c) => (c !== null ? c - 1 : null)), 1000);
@@ -275,17 +287,24 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
                                 <label className="flex flex-col text-left flex-1">
                                     <span className="text-gray-400 text-xs font-bold tracking-wider mb-2">DIFFICULTY</span>
                                     <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as Difficulty)} className="bg-black/80 border border-white/20 p-4 rounded-xl text-white focus:border-[#A855F7] outline-none transition-all cursor-pointer">
-                                        {Object.entries(difficultyLabels).map(([key, label]) => (
-                                            <option key={key} value={key}>{label.toUpperCase()}</option>
-                                        ))}
+                                        {Object.entries(difficultyLabels).map(([key, label]) => {
+                                            const isLocked = isTrial && key !== "eco" && key !== "bonus";
+                                            return (
+                                                <option key={key} value={key} disabled={isLocked}>
+                                                    {label.toUpperCase()}
+                                                </option>
+                                            );
+                                        })}
                                     </select>
                                 </label>
                                 <label className="flex flex-col text-left flex-1">
                                     <span className="text-gray-400 text-xs font-bold tracking-wider mb-2">DURATION</span>
                                     <select value={durationSeconds} onChange={(e) => setDurationSeconds(Number(e.target.value))} className="bg-black/80 border border-white/20 p-4 rounded-xl text-white focus:border-[#A855F7] outline-none transition-all cursor-pointer">
-                                        {!overrideSettings && <option value={15}>15s (Warmup)</option>}
+                                        {!overrideSettings && (
+                                            <option value={15} disabled={isTrial}>15s (Warmup)</option>
+                                        )}
                                         <option value={30}>30s (Standard)</option>
-                                        <option value={60}>60s (Endurance)</option>
+                                        <option value={60} disabled={isTrial}>60s (Endurance)</option>
                                     </select>
                                 </label>
                             </div>
