@@ -10,6 +10,7 @@ import { updateStatsWithResult } from "@/lib/utils/statsStorage";
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
 import { spawnHitmarker } from "@/lib/utils/hitmarker";
+import ComboMeter from "@/components/ComboMeter";
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; }
 interface BurstReactionProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
@@ -224,6 +225,7 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
                         </div>
                         <div className="relative z-10 w-full h-full">
                             <canvas ref={canvasRef} width={renderDimensions.width} height={renderDimensions.height} onMouseDown={handleCanvasMouseDown} className="absolute inset-0 block cursor-crosshair" />
+                            <ComboMeter combo={combo} />
                         </div>
                         {isCountingDown && (
                             <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">

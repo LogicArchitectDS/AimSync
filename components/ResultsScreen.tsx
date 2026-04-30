@@ -3,16 +3,64 @@
 import { useEffect, useRef, useState } from "react";
 import { useGameStore } from "@/store/gameStore";
 import { useRouter, useSearchParams } from "next/navigation";
+import type { GameResult } from "@/lib/game/types";
 
-export default function ResultsScreen() {
-    // Atomic selectors for performance
+// --- XP PAYOUT LOGIC ---
+// Mathematically splits the session XP into Primary (70%) and Secondary (30%) Aim Factors
+const calculateXpDistribution = (mode: string, totalXp: number) => {
+    const primaryXp = Math.floor(totalXp * 0.70);
+    const secondaryXp = Math.floor(totalXp * 0.30);
+
+    let distribution = {
+        xpGainedFlicking: 0,
+        xpGainedTracking: 0,
+        xpGainedSpeed: 0,
+        xpGainedPrecision: 0,
+        xpGainedPerception: 0,
+        xpGainedCognition: 0,
+    };
+
+    switch (mode) {
+        case 'static-flick':
+            distribution.xpGainedPrecision = primaryXp;
+            distribution.xpGainedFlicking = secondaryXp;
+            break;
+        case 'tracking-mode':
+            distribution.xpGainedTracking = primaryXp;
+            distribution.xpGainedPerception = secondaryXp;
+            break;
+        case 'reaction-test':
+            distribution.xpGainedSpeed = primaryXp;
+            distribution.xpGainedPerception = secondaryXp;
+            break;
+        case 'target-switch':
+            distribution.xpGainedCognition = primaryXp;
+            distribution.xpGainedFlicking = secondaryXp;
+            break;
+        default:
+            // Fallback: Give 100% to precision if protocol is unknown
+            distribution.xpGainedPrecision = totalXp;
+    }
+    return distribution;
+};
+
+interface ResultsScreenProps {
+    result?: GameResult | null;
+    onRestart?: () => void;
+    onBackToMenu?: () => void;
+}
+
+export default function ResultsScreen({ result, onRestart, onBackToMenu }: ResultsScreenProps = {}) {
+    // Atomic selectors for performance (legacy 3D engine support)
     const status = useGameStore(state => state.status);
-    const score = useGameStore(state => state.score);
-    const highScore = useGameStore(state => state.highScore);
-    const shotsFired = useGameStore(state => state.shotsFired);
-    const totalDuration = useGameStore(state => state.totalDuration);
-    const reset = useGameStore(state => state.reset);
-    const startGame = useGameStore(state => state.startGame);
+    const storeScore = useGameStore(state => state.score);
+    const storeHighScore = useGameStore(state => state.highScore);
+    const storeShotsFired = useGameStore(state => state.shotsFired);
+    const storeTotalDuration = useGameStore(state => state.totalDuration);
+    const storeSessionXp = useGameStore(state => state.sessionXp); // NEW: Arkham XP
+    const storeMaxCombo = useGameStore(state => state.maxCombo);   // NEW: Max Combo
+    const storeReset = useGameStore(state => state.reset);
+    const storeStartGame = useGameStore(state => state.startGame);
 
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -21,31 +69,50 @@ export default function ResultsScreen() {
     const hasSaved = useRef(false);
     const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | "error">("saving");
 
-    // Math Calculations
-    const accuracy = shotsFired > 0 ? Math.round((score / shotsFired) * 100) : 0;
-    const avgKps = (score / totalDuration).toFixed(2);
-    const isNewBest = score >= highScore && score > 0;
-    const currentMode = searchParams.get('mode') || 'unknown-protocol';
+    const isLocalMode = !!result;
 
-    // --- CLOUDFLARE D1 TELEMETRY SYNC ---
+    // Derived values
+    const currentMode = isLocalMode ? (result?.modeId || 'unknown-protocol') : (searchParams.get('mode') || 'unknown-protocol');
+    const displayScore = isLocalMode ? (result?.score || 0) : storeScore;
+    const durationSeconds = isLocalMode ? (result?.durationSeconds || 1) : storeTotalDuration;
+    const shotsFired = isLocalMode ? ((result?.hits || 0) + (result?.misses || 0)) : storeShotsFired;
+    const accuracy = isLocalMode ? (result?.accuracy || 0) : (shotsFired > 0 ? Math.round((storeScore / shotsFired) * 100) : 0);
+    const avgKps = (displayScore / (durationSeconds || 1)).toFixed(2);
+    
+    // Mock high score for 2D modes right now
+    const highScore = isLocalMode ? 0 : storeHighScore;
+    const isNewBest = displayScore >= highScore && displayScore > 0;
+    
+    const maxCombo = isLocalMode ? (Number(result?.extraStats?.["Max Combo"]) || 0) : storeMaxCombo;
+    const sessionXp = isLocalMode ? Math.round(displayScore * 10) : storeSessionXp;
+
     useEffect(() => {
-        // Only trigger the save when the game actually finishes, and only do it once
+        // For local 2D modes, we skip the API post for now as they use their own statsStorage
+        if (isLocalMode) {
+            setSaveStatus("saved");
+            return;
+        }
+
         if (status === 'finished' && !hasSaved.current) {
             hasSaved.current = true;
             setSaveStatus("saving");
 
             const saveTelemetry = async () => {
                 try {
+                    // STEP 4: Calculate the precise XP split for the 6 Factors
+                    const xpPayout = calculateXpDistribution(currentMode, sessionXp);
+
                     const response = await fetch('/api/save-session', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             userId: 'guest_user_123', // Hardcoded until Auth.js is implemented
                             protocol: currentMode,
-                            score: score,
+                            score: displayScore,
                             shotsFired: shotsFired,
                             accuracy: accuracy,
-                            kps: parseFloat(avgKps)
+                            kps: parseFloat(avgKps),
+                            ...xpPayout // Injects the 6 precise XP variables directly into the payload!
                         })
                     });
 
@@ -59,28 +126,35 @@ export default function ResultsScreen() {
 
             saveTelemetry();
         }
-    }, [status, currentMode, score, shotsFired, accuracy, avgKps]);
+    }, [isLocalMode, status, currentMode, displayScore, shotsFired, accuracy, avgKps, sessionXp]);
 
     // Only render the UI when the sequence is over
-    if (status !== 'finished') return null;
+    if (!isLocalMode && status !== 'finished') return null;
 
     const handleReturnToHub = async () => {
-        reset(); // Clear the engine state
-        if (document.fullscreenElement) {
-            await document.exitFullscreen().catch(() => { });
+        if (onBackToMenu) {
+            onBackToMenu();
+        } else {
+            storeReset();
+            if (document.fullscreenElement) {
+                await document.exitFullscreen().catch(() => { });
+            }
+            router.push('/dashboard');
         }
-        router.push('/dashboard');
     };
 
     const handlePlayAgain = () => {
-        // Reset the latch so the next game can be saved
-        hasSaved.current = false;
-        startGame(totalDuration);
+        if (onRestart) {
+            onRestart();
+        } else {
+            hasSaved.current = false;
+            storeStartGame(durationSeconds);
+        }
     };
 
     return (
         <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-xl pointer-events-auto flex items-center justify-center p-6 transition-all duration-500 ease-out animate-in fade-in zoom-in-95">
-            <div className="w-full max-w-3xl bg-[#121212] border border-white/10 rounded-3xl p-10 shadow-2xl flex flex-col items-center text-white relative overflow-hidden">
+            <div className="w-full max-w-4xl bg-[#121212] border border-white/10 rounded-3xl p-10 shadow-2xl flex flex-col items-center text-white relative overflow-hidden">
 
                 {/* Decorative Background */}
                 <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
@@ -110,20 +184,31 @@ export default function ResultsScreen() {
                     )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full mb-12 relative z-10">
-                    <div className="flex flex-col items-center p-6 bg-white/5 rounded-2xl border border-white/5 hover:border-[#3366FF]/30 transition-colors shadow-inner">
-                        <span className="text-gray-400 text-xs font-bold tracking-wider mb-2 uppercase">Final Score</span>
-                        <span className="text-5xl font-black text-white tabular-nums">{score}</span>
+                {/* THE 5-METRIC GRID (Now includes Max Combo and Total XP) */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 w-full mb-12 relative z-10">
+                    <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-white/5 shadow-inner">
+                        <span className="text-gray-500 text-[10px] font-black tracking-wider mb-2 uppercase">Score</span>
+                        <span className="text-3xl font-black text-white tabular-nums">{displayScore}</span>
                     </div>
 
-                    <div className="flex flex-col items-center p-6 bg-white/5 rounded-2xl border border-white/5 hover:border-[#1DB954]/30 transition-colors shadow-inner">
-                        <span className="text-gray-400 text-xs font-bold tracking-wider mb-2 uppercase">Accuracy</span>
-                        <span className="text-5xl font-black text-[#1DB954] tabular-nums">{accuracy}%</span>
+                    <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-white/5 shadow-inner">
+                        <span className="text-gray-500 text-[10px] font-black tracking-wider mb-2 uppercase">Accuracy</span>
+                        <span className="text-3xl font-black text-[#1DB954] tabular-nums">{accuracy}%</span>
                     </div>
 
-                    <div className="flex flex-col items-center p-6 bg-white/5 rounded-2xl border border-white/5 hover:border-cyan-400/30 transition-colors shadow-inner">
-                        <span className="text-gray-400 text-xs font-bold tracking-wider mb-2 uppercase">Avg KPS</span>
-                        <span className="text-5xl font-black text-cyan-400 tabular-nums">{avgKps}</span>
+                    <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-white/5 shadow-inner">
+                        <span className="text-gray-500 text-[10px] font-black tracking-wider mb-2 uppercase">Avg KPS</span>
+                        <span className="text-3xl font-black text-cyan-400 tabular-nums">{avgKps}</span>
+                    </div>
+
+                    <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-white/5 shadow-inner">
+                        <span className="text-gray-500 text-[10px] font-black tracking-wider mb-2 uppercase">Max Combo</span>
+                        <span className="text-3xl font-black italic text-orange-400 tabular-nums drop-shadow-md">x{maxCombo}</span>
+                    </div>
+
+                    <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-[#3366FF]/30 shadow-[0_0_15px_rgba(51,102,255,0.1)]">
+                        <span className="text-[#3366FF] text-[10px] font-black tracking-wider mb-2 uppercase">Total XP</span>
+                        <span className="text-3xl font-black text-[#3366FF] tabular-nums">+{sessionXp.toLocaleString()}</span>
                     </div>
                 </div>
 

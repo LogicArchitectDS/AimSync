@@ -1,5 +1,5 @@
 // lib/utils/storage.ts
-import { GameResult, UserStats, Routine } from "../types/schema";
+import { GameResult, UserStats, Routine } from "../game/types";
 
 const STORAGE_KEYS = {
     RESULTS: "aimsync_raw_results",

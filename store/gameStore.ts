@@ -1,84 +1,80 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 interface GameState {
     status: 'idle' | 'playing' | 'finished';
     score: number;
-    highScore: number;
     shotsFired: number;
     timeRemaining: number;
     totalDuration: number;
-    sessionStartTime: number | null;
-    
-    startGame: (duration: number) => void;
+    combo: number;
+    maxCombo: number;
+    sessionXp: number;
+
+    highScore: number; // <-- NEW: Add to the interface
+
+    startGame: (durationInSeconds: number) => void;
     recordShot: () => void;
-    recordHit: () => void;
+    recordHit: (baseXp?: number) => void;
+    recordMiss: () => void;
     tickTimer: () => void;
     endGame: () => void;
     reset: () => void;
 }
 
-export const useGameStore = create<GameState>()(
-    persist(
-        (set) => ({
-            status: 'idle',
-            score: 0,
-            highScore: 0,
-            shotsFired: 0,
-            timeRemaining: 30,
-            totalDuration: 30,
-            sessionStartTime: null,
+export const useGameStore = create<GameState>((set) => ({
+    status: 'idle',
+    score: 0,
+    shotsFired: 0,
+    timeRemaining: 30,
+    totalDuration: 30,
+    combo: 0,
+    maxCombo: 0,
+    sessionXp: 0,
 
-            startGame: (duration: number) => set({
-                status: 'playing',
-                score: 0,
-                shotsFired: 0,
-                timeRemaining: duration,
-                totalDuration: duration,
-                sessionStartTime: Date.now()
-            }),
+    highScore: 0, // <-- NEW: Initialize it
 
-            recordShot: () => set((state) => ({ shotsFired: state.shotsFired + 1 })),
-            
-            recordHit: () => set((state) => ({ score: state.score + 1 })),
+    startGame: (duration) => set({
+        status: 'playing', score: 0, shotsFired: 0,
+        timeRemaining: duration, totalDuration: duration,
+        combo: 0, maxCombo: 0, sessionXp: 0
+    }),
 
-            tickTimer: () => set((state) => {
-                if (state.status !== 'playing' || !state.sessionStartTime) return state;
+    recordShot: () => set((state) => ({ shotsFired: state.shotsFired + 1 })),
 
-                const elapsedSeconds = Math.floor((Date.now() - state.sessionStartTime) / 1000);
-                const nextTime = state.totalDuration - elapsedSeconds;
+    recordHit: (baseXp = 10) => set((state) => {
+        const newCombo = state.combo + 1;
+        const xpEarned = baseXp * newCombo;
 
-                if (nextTime <= 0) {
-                    const newHighScore = Math.max(state.score, state.highScore);
-                    return { 
-                        timeRemaining: 0, 
-                        status: 'finished',
-                        highScore: newHighScore
-                    };
-                }
-                return { timeRemaining: nextTime };
-            }),
+        return {
+            score: state.score + 1,
+            combo: newCombo,
+            maxCombo: Math.max(state.maxCombo, newCombo),
+            sessionXp: state.sessionXp + xpEarned
+        };
+    }),
 
-            endGame: () => set((state) => {
-                const newHighScore = Math.max(state.score, state.highScore);
-                return { 
-                    status: 'finished',
-                    highScore: newHighScore
-                };
-            }),
+    recordMiss: () => set({ combo: 0 }),
 
-            reset: () => set({
-                status: 'idle',
-                score: 0,
-                shotsFired: 0,
-                timeRemaining: 30,
-                totalDuration: 30,
-                sessionStartTime: null
-            })
-        }),
-        {
-            name: 'aimsync-game-storage',
-            partialize: (state) => ({ highScore: state.highScore }) // Only persist highScore
+    tickTimer: () => set((state) => {
+        if (state.timeRemaining <= 1) {
+            // NEW: Update the high score automatically when the clock hits zero
+            return {
+                timeRemaining: 0,
+                status: 'finished',
+                highScore: Math.max(state.highScore, state.score)
+            };
         }
-    )
-);
+        return { timeRemaining: state.timeRemaining - 1 };
+    }),
+
+    // NEW: Also update high score if they manually abort the game early
+    endGame: () => set((state) => ({
+        status: 'finished',
+        highScore: Math.max(state.highScore, state.score)
+    })),
+
+    // Make sure we DO NOT reset the high score here, so it persists across rounds
+    reset: () => set({
+        status: 'idle', score: 0, shotsFired: 0, combo: 0, maxCombo: 0, sessionXp: 0
+    })
+}));

@@ -10,6 +10,7 @@ import { updateStatsWithResult } from "@/lib/utils/statsStorage";
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
 import { spawnHitmarker } from "@/lib/utils/hitmarker";
+import ComboMeter from "@/components/ComboMeter";
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; }
 interface TargetSwitchProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
@@ -34,6 +35,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
     const [score, setScore] = useState(0);
     const [hits, setHits] = useState(0);
     const [misses, setMisses] = useState(0);
+    const [combo, setCombo] = useState(0);
     const [reactionTimes, setReactionTimes] = useState<number[]>([]);
     const [totalTargetsSpawned, setTotalTargetsSpawned] = useState(0);
     const [missedByTimeout, setMissedByTimeout] = useState(0);
@@ -57,6 +59,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
             if (sessionIdxRef.current !== currentSession) return;
             setMisses((prev) => prev + 1);
             setMissedByTimeout((prev) => prev + 1);
+            setCombo(0);
             setScore((prev) => Math.max(0, prev - config.missPenalty));
             spawnWave();
         }, config.targetLifetimeMs);
@@ -66,7 +69,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
         sessionIdxRef.current++;
         clearWaveTimeout();
         setGameStarted(false); setIsFinished(false);        setTimeLeft(effectiveDuration); setCountdown(null);
-        setTargets([]); setScore(0); setHits(0); setMisses(0); setReactionTimes([]);
+        setTargets([]); setScore(0); setHits(0); setMisses(0); setCombo(0); setReactionTimes([]);
         setTotalTargetsSpawned(0); setMissedByTimeout(0); setResult(null);
     };
 
@@ -141,9 +144,9 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
         const { x, y } = getScaledCanvasCoordinates(event, canvas, dimensionsRef.current.width, dimensionsRef.current.height);
         let clicked = null;
         for (const t of targets) { if (isPointInsideTarget(x, y, t.x, t.y, t.radius)) { clicked = t; break; } }
-        if (!clicked) { setMisses((p) => p + 1); setScore((p) => Math.max(0, p - config.missPenalty)); return; }
-        if (clicked.isCorrect) { const reaction = performance.now() - clicked.spawnedAt; setHits((p) => p + 1); setScore((p) => p + config.scorePerHit); setReactionTimes((p) => [...p, reaction]); spawnHitmarker(event.clientX, event.clientY); spawnWave(); return; }
-        setMisses((p) => p + 1); setScore((p) => Math.max(0, p - config.missPenalty));
+        if (!clicked) { setMisses((p) => p + 1); setCombo(0); setScore((p) => Math.max(0, p - config.missPenalty)); return; }
+        if (clicked.isCorrect) { const reaction = performance.now() - clicked.spawnedAt; const nextCombo = combo + 1; setHits((p) => p + 1); setCombo(nextCombo); setScore((p) => p + config.scorePerHit + (nextCombo * 5)); setReactionTimes((p) => [...p, reaction]); spawnHitmarker(event.clientX, event.clientY); spawnWave(); return; }
+        setMisses((p) => p + 1); setCombo(0); setScore((p) => Math.max(0, p - config.missPenalty));
     };
 
     return (
@@ -185,6 +188,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
                         </div>
                         <div className="relative z-10 w-full h-full">
                             <canvas ref={canvasRef} width={renderDimensions.width} height={renderDimensions.height} onClick={handleCanvasClick} className="absolute inset-0 block cursor-crosshair" />
+                            <ComboMeter combo={combo} />
                         </div>
                         {isCountingDown && (
                             <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">

@@ -108,7 +108,7 @@ function GameEngine() {
             </button>
 
             {/* The Active Mode Component */}
-            <ActiveComponent onFinish={handleModeFinish} />
+            {React.createElement(ActiveComponent as any, { onFinish: handleModeFinish })}
         </div>
     );
 }

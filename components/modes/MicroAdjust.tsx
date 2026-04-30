@@ -18,6 +18,7 @@ import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
 import { spawnHitmarker } from "@/lib/utils/hitmarker";
 import { useAuth } from "@/lib/contexts/AuthContext";
+import ComboMeter from "@/components/ComboMeter";
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; }
 interface MicroAdjustProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
@@ -47,6 +48,7 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
     const [score, setScore] = useState(0);
     const [hits, setHits] = useState(0);
     const [misses, setMisses] = useState(0);
+    const [combo, setCombo] = useState(0);
     const [reactionTimes, setReactionTimes] = useState<number[]>([]);
     const [totalTargetsSpawned, setTotalTargetsSpawned] = useState(0);
     const [missedByTimeout, setMissedByTimeout] = useState(0);
@@ -130,6 +132,7 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
             if (sessionIdxRef.current !== currentSession) return;
             setMisses((prev) => prev + 1);
             setMissedByTimeout((prev) => prev + 1);
+            setCombo(0);
             setScore((prev) => Math.max(0, prev - config.missPenalty));
             spawnTarget();
         }, config.targetLifetimeMs);
@@ -146,6 +149,7 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
         setScore(0);
         setHits(0);
         setMisses(0);
+        setCombo(0);
         setReactionTimes([]);
         setTotalTargetsSpawned(0);
         setMissedByTimeout(0);
@@ -252,15 +256,18 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
 
         if (isPointInsideTarget(x, y, targetRef.current.x, targetRef.current.y, targetRef.current.radius)) {
             const reaction = performance.now() - targetRef.current.spawnedAt;
+            const nextCombo = combo + 1;
             setHits((prev) => prev + 1);
+            setCombo(nextCombo);
             setReactionTimes((prev) => [...prev, reaction]);
-            setScore((prev) => prev + config.scorePerHit);
+            setScore((prev) => prev + config.scorePerHit + (nextCombo * 5));
             spawnHitmarker(event.clientX, event.clientY);
             spawnTarget();
             return;
         }
 
         setMisses((prev) => prev + 1);
+        setCombo(0);
         setScore((prev) => Math.max(0, prev - config.missPenalty));
         spawnTarget();
     };
@@ -355,6 +362,7 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
                                 onMouseDown={handleCanvasMouseDown}
                                 className="absolute inset-0 block cursor-crosshair"
                             />
+                            <ComboMeter combo={combo} />
                         </div>
 
                         {/* COUNTDOWN OVERLAY */}

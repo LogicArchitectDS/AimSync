@@ -18,6 +18,7 @@ import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
 import { spawnHitmarker } from "@/lib/utils/hitmarker";
 import { useAuth } from "@/lib/contexts/AuthContext";
+import ComboMeter from "@/components/ComboMeter";
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; }
 interface StaticFlickProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
@@ -28,6 +29,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
     const timeoutRef        = useRef<number | null>(null);
     const sessionIdxRef     = useRef(0);
     const sessionStartRef   = useRef<number>(0);
+    const lastHitTargetIdRef = useRef<string | null>(null);
 
     const dimensionsRef = useRef({ width: 1600, height: 900 });
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
@@ -47,6 +49,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
     const [score, setScore] = useState(0);
     const [hits, setHits] = useState(0);
     const [misses, setMisses] = useState(0);
+    const [combo, setCombo] = useState(0);
     const [reactionTimes, setReactionTimes] = useState<number[]>([]);
     const [totalTargetsSpawned, setTotalTargetsSpawned] = useState(0);
     const [missedByTimeout, setMissedByTimeout] = useState(0);
@@ -84,6 +87,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
             
             setMisses((prev) => prev + 1);
             setMissedByTimeout((prev) => prev + 1);
+            setCombo(0);
             setScore((prev) => Math.max(0, prev - config.missPenalty));
             spawnTarget();
         }, config.targetLifetimeMs);
@@ -101,6 +105,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
         setScore(0);
         setHits(0);
         setMisses(0);
+        setCombo(0);
         setReactionTimes([]);
         setTotalTargetsSpawned(0);
         setMissedByTimeout(0);
@@ -240,9 +245,14 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
         const { x, y } = getScaledCanvasCoordinates(event, canvas, dimensionsRef.current.width, dimensionsRef.current.height);
 
         if (isPointInsideTarget(x, y, target.x, target.y, target.radius)) {
+            if (target.id === lastHitTargetIdRef.current) return;
+            lastHitTargetIdRef.current = target.id;
+
             const reaction = performance.now() - target.spawnedAt;
+            const nextCombo = combo + 1;
             setHits((prev) => prev + 1);
-            setScore((prev) => prev + config.scorePerHit);
+            setCombo(nextCombo);
+            setScore((prev) => prev + config.scorePerHit + (nextCombo * 5)); // Reward combo
             setReactionTimes((prev) => [...prev, reaction]);
             spawnHitmarker(event.clientX, event.clientY);
             spawnTarget();
@@ -250,6 +260,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
         }
 
         setMisses((prev) => prev + 1);
+        setCombo(0);
         setScore((prev) => Math.max(0, prev - config.missPenalty));
         spawnTarget();
     };
@@ -347,6 +358,8 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
                                 onClick={handleCanvasClick}
                                 className="absolute inset-0 block cursor-crosshair"
                             />
+                            
+                            <ComboMeter combo={combo} />
                         </div>
 
                         {/* COUNTDOWN OVERLAY */}

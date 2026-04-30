@@ -87,7 +87,7 @@ export const clearStoredStats = (): void => {
 
 const getUpdatedModeStats = (existing: ModeStats | undefined, result: GameResult): ModeStats => {
     const previous: ModeStats = existing ?? {
-        mode: result.mode,
+        mode: result.modeId,
         sessionsPlayed: 0,
         bestScore: 0,
         bestAccuracy: 0,
@@ -107,14 +107,12 @@ const getUpdatedModeStats = (existing: ModeStats | undefined, result: GameResult
                 : Math.min(previous.bestAverageReactionTime, result.averageReactionTime);
 
     const updatedTargetsPerSecond =
-        result.targetsPerSecond === undefined
-            ? previous.bestTargetsPerSecond
-            : previous.bestTargetsPerSecond === undefined
-                ? result.targetsPerSecond
-                : Math.max(previous.bestTargetsPerSecond, result.targetsPerSecond);
+        previous.bestTargetsPerSecond === undefined
+            ? 0
+            : previous.bestTargetsPerSecond;
 
     return {
-        mode: result.mode,
+        mode: result.modeId,
         sessionsPlayed: previous.sessionsPlayed + 1,
         bestScore: Math.max(previous.bestScore, result.score),
         bestAccuracy: Math.max(previous.bestAccuracy, result.accuracy),
@@ -123,25 +121,25 @@ const getUpdatedModeStats = (existing: ModeStats | undefined, result: GameResult
         totalHits: previous.totalHits + result.hits,
         totalMisses: previous.totalMisses + result.misses,
         totalScore: previous.totalScore + result.score,
-        totalPlaytime: previous.totalPlaytime + result.duration,
+        totalPlaytime: previous.totalPlaytime + result.durationSeconds,
     };
 };
 
 export const updateStatsWithResult = (result: GameResult): StoredStats => {
     const current = getStoredStats();
-    const updatedModeStats = getUpdatedModeStats(current.modes[result.mode], result);
+    const updatedModeStats = getUpdatedModeStats(current.modes[result.modeId], result);
 
     const updated: StoredStats = {
         modes: {
             ...current.modes,
-            [result.mode]: updatedModeStats,
+            [result.modeId]: updatedModeStats,
         },
         lifetime: {
             totalSessionsPlayed: current.lifetime.totalSessionsPlayed + 1,
             totalHits: current.lifetime.totalHits + result.hits,
             totalMisses: current.lifetime.totalMisses + result.misses,
             totalScore: current.lifetime.totalScore + result.score,
-            totalPlaytime: current.lifetime.totalPlaytime + result.duration,
+            totalPlaytime: current.lifetime.totalPlaytime + result.durationSeconds,
         },
         recentSessions: [result, ...current.recentSessions].slice(0, MAX_RECENT_SESSIONS),
     };

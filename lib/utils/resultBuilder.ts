@@ -1,6 +1,6 @@
 // lib/utils/resultBuilder.ts
 
-import type { GameResult, Difficulty } from "../types/schema";
+import type { GameResult, Difficulty } from "../game/types";
 
 export function buildGameResult(rawData: any): GameResult {
     // 1. Adapter: Convert old "Burst Reaction" to strict "burst-reaction" modeId
