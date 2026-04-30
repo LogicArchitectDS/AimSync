@@ -1,31 +1,36 @@
 import { NextResponse } from 'next/server';
+import { auth } from '@/auth'; // Import our new Auth engine
 
-// Force Next.js to run this API on Cloudflare's Edge network
 export const runtime = 'edge';
 
 export async function POST(request: Request) {
     try {
-        const body = await request.json();
-        const { userId, protocol, score, shotsFired, accuracy, kps } = body;
-
-        // Grab the D1 database binding from the Edge environment
-        // Note: process.env.DB requires the @cloudflare/next-on-pages setup
-        const db = process.env.DB as any;
-
-        if (!db) {
-            throw new Error("D1 Database binding not found.");
+        // 1. SECURITY CHECK: Verify the player is actually logged in
+        const session = await auth();
+        if (!session || !session.user) {
+            return NextResponse.json({ success: false, error: 'Unauthorized. Please log in.' }, { status: 401 });
         }
 
-        // Prepare and execute the SQL statement
+        // 2. The real, un-spoofable Discord ID
+        const actualUserId = session.user.id;
+
+        const body = await request.json();
+        // We ignore the userId from the frontend completely now
+        const { protocol, score, shotsFired, accuracy, kps } = body;
+
+        const db = process.env.DB as any;
+        if (!db) throw new Error("D1 Database binding not found.");
+
+        // Insert using the real user ID
         const stmt = db.prepare(`
       INSERT INTO training_sessions (user_id, protocol, score, shots_fired, accuracy, kps)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(userId, protocol, score, shotsFired, accuracy, kps);
+    `).bind(actualUserId, protocol, score, shotsFired, accuracy, kps);
 
         const result = await stmt.run();
 
         if (result.success) {
-            return NextResponse.json({ success: true, message: 'Session saved to D1' }, { status: 200 });
+            return NextResponse.json({ success: true, message: 'Session saved securely' }, { status: 200 });
         } else {
             throw new Error("Failed to insert into D1");
         }
