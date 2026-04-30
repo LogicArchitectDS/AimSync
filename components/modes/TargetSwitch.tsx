@@ -12,14 +12,15 @@ import ResultsScreen from "@/components/ResultsScreen";
 import { spawnHitmarker } from "@/lib/utils/hitmarker";
 import ComboMeter from "@/components/ComboMeter";
 
+
 interface OverrideSettings { difficulty: Difficulty; duration: number; }
 interface TargetSwitchProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
 
 export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitchProps = {}) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const timeoutRef    = useRef<number | null>(null);
-    const sessionIdxRef     = useRef(0);
+    const timeoutRef = useRef<number | null>(null);
+    const sessionIdxRef = useRef(0);
     const sessionStartRef = useRef<number>(0);
     const dimensionsRef = useRef({ width: 1600, height: 900 });
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
@@ -68,7 +69,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
     const resetState = () => {
         sessionIdxRef.current++;
         clearWaveTimeout();
-        setGameStarted(false); setIsFinished(false);        setTimeLeft(effectiveDuration); setCountdown(null);
+        setGameStarted(false); setIsFinished(false); setTimeLeft(effectiveDuration); setCountdown(null);
         setTargets([]); setScore(0); setHits(0); setMisses(0); setCombo(0); setReactionTimes([]);
         setTotalTargetsSpawned(0); setMissedByTimeout(0); setResult(null);
     };
@@ -94,11 +95,11 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
 
     useEffect(() => {
         if (countdown === null) return;
-        if (countdown === 0) { 
-            setCountdown(null); 
+        if (countdown === 0) {
+            setCountdown(null);
             sessionStartRef.current = performance.now();
-            spawnWave(); 
-            return; 
+            spawnWave();
+            return;
         }
         const timer = window.setTimeout(() => setCountdown((c) => (c !== null ? c - 1 : null)), 1000);
         return () => window.clearTimeout(timer);
@@ -118,7 +119,8 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
         const timer = window.setInterval(() => setTimeLeft((prev) => Math.max(0, prev - 1)), 1000);
         return () => window.clearInterval(timer);
     }, [gameStarted, countdown]);
-    useEffect(() => { if (gameStarted && timeLeft === 0 && !isFinished && countdown === null) endSession(); // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => {
+        if (gameStarted && timeLeft === 0 && !isFinished && countdown === null) endSession(); // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [timeLeft, gameStarted, isFinished, countdown]);
     useEffect(() => { return () => clearWaveTimeout(); }, []);
 
