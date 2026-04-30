@@ -8,23 +8,28 @@ import * as THREE from 'three';
 // Stores & Components
 import WeaponModel from './WeaponModel';
 import TargetManager from './TargetManager';
+import TrackingManager from './TrackingManager'; // NEW: Imported the Tracking Mode
 import { useWeaponStore } from '@/store/weaponStore';
 import { useRecoil } from '@/hooks/UseRecoil';
-import { useGameStore } from '@/store/gameStore'; // NEW: Added GameStore
+import { useGameStore } from '@/store/gameStore';
 
 function EngineCore() {
     const { camera, scene } = useThree();
     const activeWeapon = useWeaponStore((state) => state.activeWeapon);
 
-    // Pull the math from our custom hook
+    // Pull the recoil math and combo trackers
     const { startFiring, stopFiring, getShotTrajectory } = useRecoil(activeWeapon);
-
-    // NEW: Pull the Freeflow tracking actions
     const { recordShot, recordHit, recordMiss } = useGameStore();
 
     const raycaster = useRef(new THREE.Raycaster());
     const isHoldingTrigger = useRef(false);
+
+    // --- ENGINE 1: STATIC FLICK STATE ---
     const lastShotTime = useRef(0);
+
+    // --- ENGINE 2: TRACKING STATE ---
+    const lockOnTime = useRef(0);
+    const wasTrackingLastFrame = useRef(false);
 
     useEffect(() => {
         const handleMouseDown = (e: MouseEvent) => {
@@ -50,34 +55,69 @@ function EngineCore() {
         };
     }, [activeWeapon, startFiring, stopFiring]);
 
-    useFrame(() => {
-        if (!activeWeapon || !isHoldingTrigger.current) return;
+    // 144+ Hz Game Loop
+    useFrame((state, delta) => {
+        if (!activeWeapon || !isHoldingTrigger.current) {
+            // If they let go of the trigger, break the tracking combo instantly
+            if (wasTrackingLastFrame.current) {
+                recordMiss();
+                wasTrackingLastFrame.current = false;
+                lockOnTime.current = 0;
+            }
+            return;
+        }
 
         const now = performance.now();
         const timeBetweenShots = 1000 / activeWeapon.fireRate;
 
+        // The "Always-On" Hybrid Raycaster
+        const { offsetX, offsetY } = getShotTrajectory();
+        raycaster.current.setFromCamera(new THREE.Vector2(offsetX, offsetY), camera);
+        const intersects = raycaster.current.intersectObjects(scene.children, true);
+
+        const hitObject = intersects.length > 0 ? intersects[0].object : null;
+
+        // ==========================================
+        // ENGINE 1: CONTINUOUS TRACKING MODE
+        // ==========================================
+        if (hitObject && hitObject.name === 'tracking-target') {
+            wasTrackingLastFrame.current = true;
+
+            // Accumulate delta time (e.g., +0.016s per frame)
+            lockOnTime.current += delta;
+
+            // Every time they hold it for 1 full second, pay out the XP!
+            if (lockOnTime.current >= 1.0) {
+                recordHit(10); // Award 10 XP & increment Arkham Combo
+                lockOnTime.current -= 1.0; // Subtract 1 second, but keep the fractional remainder!
+            }
+        } else {
+            // They slipped off the tracking target!
+            if (wasTrackingLastFrame.current) {
+                recordMiss(); // SHATTER THE COMBO
+                lockOnTime.current = 0;
+                wasTrackingLastFrame.current = false;
+            }
+        }
+
+        // ==========================================
+        // ENGINE 2: STATIC FLICK MODE
+        // ==========================================
         if (now - lastShotTime.current >= timeBetweenShots) {
             lastShotTime.current = now;
-
-            // Log the bullet leaving the chamber
             recordShot();
 
-            const { offsetX, offsetY } = getShotTrajectory();
-            raycaster.current.setFromCamera(new THREE.Vector2(offsetX, offsetY), camera);
-            const intersects = raycaster.current.intersectObjects(scene.children, true);
-
-            // --- ARKHAM HIT/MISS DETECTOR ---
-            if (intersects.length > 0 && intersects[0].object.name === 'target') {
-                const hitObject = intersects[0].object;
-
-                // COMBO MAINTAINED: Award 10 base XP (which multiplies by the combo inside the store)
-                recordHit(10);
-
-                if (hitObject.userData && hitObject.userData.onHit) {
-                    hitObject.userData.onHit(hitObject.userData.id);
+            if (hitObject && hitObject.name === 'target') {
+                // The Death Lock: Prevents ghost-spawns
+                if (!hitObject.userData.isDead) {
+                    hitObject.userData.isDead = true;
+                    recordHit(10);
+                    if (hitObject.userData.onHit) {
+                        hitObject.userData.onHit(hitObject.userData.id);
+                    }
                 }
-            } else {
-                // COMBO BROKEN: They clicked and hit the void!
+            } else if (!hitObject || hitObject.name !== 'tracking-target') {
+                // They fired, missed the blue static target, AND missed the orange tracking target
                 recordMiss();
             }
         }
@@ -89,7 +129,10 @@ function EngineCore() {
             <ambientLight intensity={0.5} />
             <directionalLight position={[10, 10, 10]} intensity={1} />
 
+            {/* For now, both managers run simultaneously so you can test them side-by-side */}
             <TargetManager />
+            <TrackingManager />
+
             {activeWeapon && <WeaponModel weaponType={activeWeapon.type} />}
         </>
     );
