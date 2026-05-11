@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react'; // <-- 1. Import these
+import { useState, useEffect } from 'react';
 import {
     Radar, RadarChart, PolarGrid,
     PolarAngleAxis, ResponsiveContainer, Tooltip
@@ -19,7 +19,6 @@ interface RadarProfilerProps {
 }
 
 export default function RadarProfiler({ stats }: RadarProfilerProps) {
-    // 2. Add this mount check state
     const [isMounted, setIsMounted] = useState(false);
 
     useEffect(() => {
@@ -44,24 +43,37 @@ export default function RadarProfiler({ stats }: RadarProfilerProps) {
                 AimSync Diagnostic
             </h2>
 
-            <div className="w-full h-[300px] relative z-10 flex items-center justify-center">
-                {/* 3. Wrap the chart in the mount check! */}
-                {isMounted ? (
-                    <ResponsiveContainer width="100%" height="100%">
+            {/* Parent container with a strict physical minimum height */}
+            <div className="w-full min-h-[300px] relative z-10 flex items-center justify-center">
+
+                {/* 1. The Mount Check */}
+                {!isMounted ? (
+                    <div className="w-48 h-48 rounded-full border-4 border-white/5 border-t-blue-500 animate-spin" />
+                ) : (
+                    /* 2. THE FIX: Changed height="100%" to a strict height={300} */
+                    <ResponsiveContainer width="100%" height={300}>
                         <RadarChart cx="50%" cy="50%" outerRadius="70%" data={data}>
                             <PolarGrid stroke="rgba(255,255,255,0.1)" />
-                            <PolarAngleAxis dataKey="subject" tick={{ fill: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 'bold', fontFamily: 'monospace' }} />
+                            <PolarAngleAxis
+                                dataKey="subject"
+                                tick={{ fill: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 'bold', fontFamily: 'monospace' }}
+                            />
                             <Tooltip
                                 contentStyle={{ backgroundColor: '#000', borderColor: 'rgba(59,130,246,0.5)', borderRadius: '12px' }}
                                 itemStyle={{ color: '#3b82f6', fontWeight: 'bold' }}
                                 formatter={(value: any) => [`Level ${value}`, 'Current Rank']}
                             />
-                            <Radar name="Player Stats" dataKey="level" stroke="#3b82f6" strokeWidth={3} fill="#3b82f6" fillOpacity={0.4} animationDuration={1500} />
+                            <Radar
+                                name="Player Stats"
+                                dataKey="level"
+                                stroke="#3b82f6"
+                                strokeWidth={3}
+                                fill="#3b82f6"
+                                fillOpacity={0.4}
+                                animationDuration={1500}
+                            />
                         </RadarChart>
                     </ResponsiveContainer>
-                ) : (
-                    // While waiting that 1 millisecond, show a cool glowing ring
-                    <div className="w-48 h-48 rounded-full border-4 border-white/5 border-t-blue-500 animate-spin" />
                 )}
             </div>
         </div>

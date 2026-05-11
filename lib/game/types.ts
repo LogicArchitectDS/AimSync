@@ -72,3 +72,23 @@ export interface Routine {
     createdAt: string;
     drills: RoutineStep[];
 }
+
+export interface PlaylistTask {
+    mode: string;
+    difficulty: string;
+    timeLimit: number; // e.g., 60 seconds
+}
+
+export interface CustomPlaylist {
+    id: string;
+    name: string;
+    description: string;
+    tasks: PlaylistTask[];
+    createdAt: number;
+}
+
+// Add this to your existing UserStats interface:
+export interface UserStats {
+    // ... your existing stats (globalAccuracy, etc.)
+    playlists?: CustomPlaylist[];
+}

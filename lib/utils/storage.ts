@@ -1,5 +1,6 @@
 // lib/utils/storage.ts
 import { GameResult, UserStats, Routine } from "../game/types";
+import type { CustomPlaylist } from '../game/types';
 
 const STORAGE_KEYS = {
     RESULTS: "aimsync_raw_results",
@@ -15,6 +16,34 @@ const isBrowser = typeof window !== "undefined";
  * Swap the internals of these functions later to use Supabase/Postgres.
  */
 export const StorageEngine = {
+
+    // Inside StorageEngine...
+
+    getPlaylists: (): CustomPlaylist[] => {
+        if (typeof window === 'undefined') return [];
+        const stats = StorageEngine.getUserStats();
+        return stats.playlists || [];
+    },
+
+    savePlaylist: (playlist: CustomPlaylist) => {
+        if (typeof window === 'undefined') return;
+        const stats = StorageEngine.getUserStats();
+
+        // Initialize array if it doesn't exist
+        if (!stats.playlists) stats.playlists = [];
+
+        stats.playlists.push(playlist);
+        localStorage.setItem('aimsync_stats', JSON.stringify(stats));
+    },
+
+    deletePlaylist: (playlistId: string) => {
+        if (typeof window === 'undefined') return;
+        const stats = StorageEngine.getUserStats();
+        if (!stats.playlists) return;
+
+        stats.playlists = stats.playlists.filter(p => p.id !== playlistId);
+        localStorage.setItem('aimsync_stats', JSON.stringify(stats));
+    },
 
     // --- RAW RESULTS ---
     saveGameResult: (result: GameResult): void => {

@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { StorageEngine } from "@/lib/utils/storage";
 import { useAuth } from "@/lib/contexts/AuthContext";
-import type { UserStats } from "@/lib/game/types";
+import type { UserStats, CustomPlaylist, PlaylistTask } from "@/lib/game/types";
 import dynamic from 'next/dynamic';
 
 const RadarProfiler = dynamic(() => import('@/components/RadarProfiler'), {
@@ -27,22 +27,29 @@ function getRankInfo(stats: UserStats) {
 
 export default function DashboardPage() {
     const [stats, setStats] = useState<UserStats | null>(null);
+    const [playlists, setPlaylists] = useState<CustomPlaylist[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+
+    // --- MODAL STATE ---
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [newPlaylistName, setNewPlaylistName] = useState("");
+    const [newPlaylistDesc, setNewPlaylistDesc] = useState("");
+    const [draftTasks, setDraftTasks] = useState<PlaylistTask[]>([]);
+
+    // Temporary states for the dropdowns inside the modal
+    const [selectedMode, setSelectedMode] = useState("static-flick");
+    const [selectedDiff, setSelectedDiff] = useState("Normal");
+    const [selectedTime, setSelectedTime] = useState(60);
+
     const { user, isTrial, logout } = useAuth();
     const router = useRouter();
 
-    const mockDbStats = {
-        flickingXp: 8100,
-        trackingXp: 2500,
-        speedXp: 400,
-        precisionXp: 14400,
-        perceptionXp: 100,
-        cognitionXp: 900
-    };
+    const mockDbStats = { flickingXp: 8100, trackingXp: 2500, speedXp: 400, precisionXp: 14400, perceptionXp: 100, cognitionXp: 900 };
 
     useEffect(() => {
         const timer = setTimeout(() => {
             setStats(StorageEngine.getUserStats());
+            setPlaylists(StorageEngine.getPlaylists());
             setIsLoading(false);
         }, 0);
         return () => clearTimeout(timer);
@@ -55,7 +62,33 @@ export default function DashboardPage() {
         return `${mins}m ${seconds % 60}s`;
     };
 
-    // --- FULLY DYNAMIC TASK GENERATOR (DAILIES) ---
+    // --- PLAYLIST LOGIC ---
+    const handleAddTaskToDraft = () => {
+        setDraftTasks([...draftTasks, { mode: selectedMode, difficulty: selectedDiff, timeLimit: selectedTime }]);
+    };
+
+    const handleSavePlaylist = () => {
+        if (!newPlaylistName || draftTasks.length === 0) return;
+
+        const newPlaylist: CustomPlaylist = {
+            id: `playlist-${Date.now()}`,
+            name: newPlaylistName,
+            description: newPlaylistDesc || "Custom Training Regimen",
+            tasks: draftTasks,
+            createdAt: Date.now()
+        };
+
+        StorageEngine.savePlaylist(newPlaylist);
+        setPlaylists([...playlists, newPlaylist]);
+
+        // Reset and close
+        setNewPlaylistName("");
+        setNewPlaylistDesc("");
+        setDraftTasks([]);
+        setIsModalOpen(false);
+    };
+
+    // --- DYNAMIC TASK GENERATORS (Dailies) ---
     const activeTasks = useMemo(() => {
         const date = new Date();
         const dailySeed = date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
@@ -91,9 +124,7 @@ export default function DashboardPage() {
             { mode: 'static-flick', name: 'Flick Endurance', focus: 'flick stamina' },
             { mode: 'continuous-track', name: 'Tracking Overdrive', focus: 'smooth tracking' },
             { mode: 'micro-precision', name: 'Needlepoint', focus: 'micro-adjustments' },
-            { mode: 'cognition-react', name: 'Cognitive Test', focus: 'decision making' },
-            { mode: 'echolocation', name: 'Audio Snap', focus: 'spatial audio reactions' },
-            { mode: 'cognitive-overdrive', name: 'Cognitive Overdrive', focus: 'target discrimination' }
+            { mode: 'cognition-react', name: 'Cognitive Test', focus: 'decision making' }
         ];
 
         const r1Index = dailySeed % randomPoolBases.length;
@@ -130,30 +161,39 @@ export default function DashboardPage() {
         };
     }, []);
 
+    // --- THE MATRIX GENERATOR (Sandbox) ---
+    const baseModes = [
+        { mode: 'static-flick', name: 'Static Flick', desc: 'Classic 3-target gridset.', category: 'Flicking', badgeColor: 'text-blue-400 border-blue-400/30 bg-blue-400/10' },
+        { mode: 'continuous-track', name: 'Orbital Tracking', desc: 'Erratic 3D drone tracking.', category: 'Tracking', badgeColor: 'text-orange-400 border-orange-400/30 bg-orange-400/10' },
+        { mode: 'micro-precision', name: 'Needlepoint', desc: 'Micro-target precision training.', category: 'Precision', badgeColor: 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10' },
+        { mode: 'cognition-react', name: 'Cognition Test', desc: 'Rapid target identification.', category: 'Cognition', badgeColor: 'text-purple-400 border-purple-400/30 bg-purple-400/10' }
+    ];
 
-    if (isLoading) {
-        return (
-            <div className="flex-1 flex items-center justify-center min-h-[50vh]">
-                <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-            </div>
+    const trainingProtocols = useMemo(() => {
+        const allDifficulties = ['Eco', 'Bonus', 'Force Buy', 'Full Buy'];
+        return baseModes.flatMap(base =>
+            allDifficulties.map(diff => ({
+                ...base,
+                uid: `${base.mode}-${diff.toLowerCase().replace(' ', '-')}`,
+                difficulty: diff,
+                highScore: stats?.modes?.[base.mode]?.highScore || 0,
+                avgAcc: stats?.modes?.[base.mode]?.averageAccuracy || 0,
+            }))
         );
-    }
+    }, [stats]);
+
+
+    if (isLoading) return <div className="flex-1 flex items-center justify-center min-h-[50vh]"><div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>;
 
     if (!stats || stats.totalGamesPlayed === 0) {
         return (
             <div className="flex flex-col items-center justify-center space-y-6 max-w-xl mx-auto border border-white/10 bg-surface/60 backdrop-blur-md p-12 rounded-2xl shadow-2xl my-auto w-full">
                 <div className="w-20 h-20 bg-black/50 rounded-full flex items-center justify-center mx-auto mb-6 border border-white/5 shadow-[inset_0_0_20px_rgba(59,130,246,0.2)]">
-                    <svg className="w-10 h-10 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                    </svg>
+                    <svg className="w-10 h-10 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                 </div>
                 <h2 className="text-3xl font-black tracking-widest uppercase text-white">Initialization Required</h2>
-                <p className="text-slate-400 text-sm leading-relaxed text-center">
-                    Your performance matrix is currently empty. To calibrate your baseline and unlock advanced analytics, deploy into a training protocol.
-                </p>
-                <button onClick={() => router.push('/game?mode=static-flick')} className="mt-6 px-8 py-4 bg-blue-600 text-white font-black text-xs tracking-[0.2em] uppercase rounded-md hover:bg-blue-500 transition-colors shadow-[0_0_20px_rgba(59,130,246,0.3)]">
-                    Deploy Baseline Protocol
-                </button>
+                <p className="text-slate-400 text-sm leading-relaxed text-center">Your performance matrix is currently empty. To calibrate your baseline and unlock advanced analytics, deploy into a training protocol.</p>
+                <button onClick={() => router.push('/game?mode=static-flick')} className="mt-6 px-8 py-4 bg-blue-600 text-white font-black text-xs tracking-[0.2em] uppercase rounded-md hover:bg-blue-500 transition-colors shadow-[0_0_20px_rgba(59,130,246,0.3)]">Deploy Baseline Protocol</button>
             </div>
         );
     }
@@ -161,9 +201,70 @@ export default function DashboardPage() {
     const rankInfo = getRankInfo(stats);
 
     return (
-        <div className="flex flex-col gap-8 w-full">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="flex flex-col gap-8 w-full relative">
 
+            {/* --- PLAYLIST CREATOR MODAL --- */}
+            {isModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+                    <div className="bg-[#121212] border border-white/10 rounded-2xl p-8 w-full max-w-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)]">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-black text-white uppercase tracking-widest">Create Regimen</h2>
+                            <button onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-red-500 font-bold">X</button>
+                        </div>
+
+                        <div className="flex flex-col gap-4 mb-6">
+                            <input type="text" placeholder="Playlist Name (e.g., Valorant Warmup)" value={newPlaylistName} onChange={(e) => setNewPlaylistName(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500 font-bold" />
+                            <input type="text" placeholder="Short Description..." value={newPlaylistDesc} onChange={(e) => setNewPlaylistDesc(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-lg p-3 text-slate-300 text-sm focus:outline-none focus:border-blue-500" />
+                        </div>
+
+                        {/* Task Selector */}
+                        <div className="bg-white/5 border border-white/10 rounded-lg p-4 mb-6">
+                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Add Exercise</h3>
+                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                                <select className="bg-black text-white text-xs p-2 rounded border border-white/10 sm:col-span-2" value={selectedMode} onChange={(e) => setSelectedMode(e.target.value)}>
+                                    {baseModes.map(m => <option key={m.mode} value={m.mode}>{m.name}</option>)}
+                                </select>
+                                <select className="bg-black text-white text-xs p-2 rounded border border-white/10" value={selectedDiff} onChange={(e) => setSelectedDiff(e.target.value)}>
+                                    <option value="Eco">Eco</option>
+                                    <option value="Bonus">Bonus</option>
+                                    <option value="Force Buy">Force Buy</option>
+                                    <option value="Full Buy">Full Buy</option>
+                                </select>
+                                <select className="bg-black text-white text-xs p-2 rounded border border-white/10" value={selectedTime} onChange={(e) => setSelectedTime(Number(e.target.value))}>
+                                    <option value={30}>30s</option>
+                                    <option value={60}>60s</option>
+                                    <option value={120}>120s</option>
+                                </select>
+                            </div>
+                            <button onClick={handleAddTaskToDraft} className="mt-3 w-full py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-bold uppercase tracking-widest rounded transition-colors">+ Add to Queue</button>
+                        </div>
+
+                        {/* Draft Queue Preview */}
+                        <div className="mb-6 max-h-40 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
+                            {draftTasks.length === 0 ? (
+                                <p className="text-center text-slate-600 text-xs italic">Queue is empty.</p>
+                            ) : (
+                                draftTasks.map((t, i) => (
+                                    <div key={i} className="flex justify-between items-center bg-black/40 border border-white/5 p-2 rounded mb-2">
+                                        <span className="text-white text-xs font-bold">{baseModes.find(m => m.mode === t.mode)?.name}</span>
+                                        <div className="flex gap-2">
+                                            <span className="text-[9px] text-orange-400 border border-orange-400/20 bg-orange-400/10 px-2 py-0.5 rounded">{t.difficulty}</span>
+                                            <span className="text-[9px] text-slate-400 border border-white/10 bg-white/5 px-2 py-0.5 rounded">{t.timeLimit}s</span>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        <button onClick={handleSavePlaylist} disabled={!newPlaylistName || draftTasks.length === 0} className="w-full py-3 bg-blue-600 disabled:bg-slate-800 disabled:text-slate-500 hover:bg-blue-500 text-white font-black uppercase tracking-widest rounded-lg transition-colors shadow-[0_0_20px_rgba(59,130,246,0.3)]">
+                            Save Regimen
+                        </button>
+                    </div>
+                </div>
+            )}
+
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 {/* LEFT PANEL */}
                 <div className="lg:col-span-4 flex flex-col gap-6">
                     <div className="bg-surface/60 border border-white/10 rounded-xl p-6 backdrop-blur-md flex flex-col items-center text-center">
@@ -173,43 +274,20 @@ export default function DashboardPage() {
                                 {user?.profilePhoto ? (
                                     <img src={user.profilePhoto} alt="Avatar" className="w-full h-full object-cover" />
                                 ) : (
-                                    <span className={`text-4xl font-black ${rankInfo.color}`} style={{ textShadow: `0 0 20px ${rankInfo.glow}` }}>
-                                        {isTrial ? "T" : (user?.username?.charAt(0) || rankInfo.tier.charAt(0))}
-                                    </span>
+                                    <span className={`text-4xl font-black ${rankInfo.color}`} style={{ textShadow: `0 0 20px ${rankInfo.glow}` }}>{isTrial ? "T" : (user?.username?.charAt(0) || rankInfo.tier.charAt(0))}</span>
                                 )}
                             </div>
                         </div>
-                        <h2 className="text-xl font-black tracking-widest text-white mb-1">
-                            {isTrial ? "Trial Agent" : (user?.username || "Agent_01")}
-                        </h2>
-                        <p className={`text-xs font-bold uppercase tracking-[0.2em] ${rankInfo.color} mb-6`}>
-                            {isTrial ? "Guest Protocol" : rankInfo.tier}
-                        </p>
-
+                        <h2 className="text-xl font-black tracking-widest text-white mb-1">{isTrial ? "Trial Agent" : (user?.username || "Agent_01")}</h2>
+                        <p className={`text-xs font-bold uppercase tracking-[0.2em] ${rankInfo.color} mb-6`}>{isTrial ? "Guest Protocol" : rankInfo.tier}</p>
                         <div className="w-full h-px bg-white/5 mb-4" />
-
-                        <button
-                            onClick={logout}
-                            className="w-full py-2 mb-6 border border-white/5 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-white hover:bg-red-500 transition-all"
-                        >
-                            Sign Out Terminal
-                        </button>
-
+                        <button onClick={logout} className="w-full py-2 mb-6 border border-white/5 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-white hover:bg-red-500 transition-all">Sign Out Terminal</button>
                         <div className="w-full grid grid-cols-2 gap-4 text-left">
-                            <div>
-                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Total Plays</p>
-                                <p className="text-xl font-mono text-white">{stats.totalGamesPlayed}</p>
-                            </div>
-                            <div>
-                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Play Time</p>
-                                <p className="text-xl font-mono text-white">{formatTime(stats.timePlayedSeconds || 0)}</p>
-                            </div>
+                            <div><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Total Plays</p><p className="text-xl font-mono text-white">{stats.totalGamesPlayed}</p></div>
+                            <div><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Play Time</p><p className="text-xl font-mono text-white">{formatTime(stats.timePlayedSeconds || 0)}</p></div>
                         </div>
                     </div>
-
-                    <div className="flex items-center justify-center">
-                        <RadarProfiler stats={mockDbStats} />
-                    </div>
+                    <div className="flex items-center justify-center"><RadarProfiler stats={mockDbStats} /></div>
                 </div>
 
                 {/* RIGHT PANEL */}
@@ -218,13 +296,8 @@ export default function DashboardPage() {
                     {/* BOX 1: ACTIVE OPERATIONS */}
                     <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
-                            <div>
-                                <h2 className="text-white font-black text-lg uppercase tracking-widest">Active Operations</h2>
-                                <p className="text-slate-400 text-sm">Time-sensitive training contracts</p>
-                            </div>
+                            <div><h2 className="text-white font-black text-lg uppercase tracking-widest">Active Operations</h2><p className="text-slate-400 text-sm">Time-sensitive training contracts</p></div>
                         </div>
-
-                        {/* DAILY CONTRACTS */}
                         <div className="mb-8">
                             <div className="flex items-center gap-3 mb-4 px-2">
                                 <div className="h-2 w-2 bg-blue-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.8)]" />
@@ -245,19 +318,12 @@ export default function DashboardPage() {
                                                     <span className="text-[9px] font-mono text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded border border-purple-400/20">✨ +{task.xpReward} XP</span>
                                                 </div>
                                             </div>
-                                            <button
-                                                onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}`)}
-                                                className="px-6 py-2 bg-white/5 hover:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded border border-white/10 hover:border-blue-500 transition-all opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0"
-                                            >
-                                                Deploy
-                                            </button>
+                                            <button onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}`)} className="px-6 py-2 bg-white/5 hover:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded border border-white/10 hover:border-blue-500 transition-all opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0">Deploy</button>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         </div>
-
-                        {/* WEEKLY OPERATIONS */}
                         <div>
                             <div className="flex items-center gap-3 mb-4 px-2">
                                 <div className="h-2 w-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]" />
@@ -277,12 +343,7 @@ export default function DashboardPage() {
                                                     <span className="text-[9px] font-mono text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded border border-purple-400/20">✨ +{task.xpReward} XP</span>
                                                 </div>
                                             </div>
-                                            <button
-                                                onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}`)}
-                                                className="px-6 py-2 bg-white/5 hover:bg-red-600 text-white text-[10px] font-black uppercase tracking-widest rounded border border-white/10 hover:border-red-500 transition-all opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0"
-                                            >
-                                                Deploy
-                                            </button>
+                                            <button onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}`)} className="px-6 py-2 bg-white/5 hover:bg-red-600 text-white text-[10px] font-black uppercase tracking-widest rounded border border-white/10 hover:border-red-500 transition-all opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0">Deploy</button>
                                         </div>
                                     </div>
                                 ))}
@@ -290,40 +351,75 @@ export default function DashboardPage() {
                         </div>
                     </div>
 
+                    {/* BOX 1.5: CUSTOM REGIMENS (PLAYLISTS) */}
+                    <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+                            <div>
+                                <h2 className="text-white font-black text-lg uppercase tracking-widest">Custom Regimens</h2>
+                                <p className="text-slate-400 text-sm">Your personal warmup routines</p>
+                            </div>
+                            <button onClick={() => setIsModalOpen(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest rounded transition-colors shadow-[0_0_15px_rgba(59,130,246,0.3)]">
+                                + Create Routine
+                            </button>
+                        </div>
+
+                        {playlists.length === 0 ? (
+                            <div className="text-center py-8 border border-dashed border-white/10 rounded-lg bg-black/20">
+                                <p className="text-slate-500 text-xs font-mono uppercase tracking-widest mb-2">No active routines found</p>
+                                <p className="text-slate-600 text-[10px]">Create a custom playlist to structure your daily warmup.</p>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col gap-2">
+                                {playlists.map((playlist) => (
+                                    <div key={playlist.id} className="group flex justify-between items-center bg-[#121212]/50 border border-white/5 rounded-lg p-4 hover:border-blue-500/30 transition-all cursor-pointer">
+                                        <div>
+                                            <h4 className="text-white font-bold text-sm tracking-wide group-hover:text-blue-400 transition-colors">{playlist.name}</h4>
+                                            <p className="text-slate-500 text-[11px] mt-1">{playlist.description}</p>
+                                            <div className="mt-2 text-[9px] font-mono text-slate-400">
+                                                {playlist.tasks.length} Exercises Locked In
+                                            </div>
+                                        </div>
+                                        <button
+                                            // TODO: To play sequentially, we need an Engine Playlist Controller!
+                                            // For now, it just boots the very first task in the array.
+                                            onClick={() => router.push(`/game?mode=${playlist.tasks[0].mode}&time=${playlist.tasks[0].timeLimit}&diff=${playlist.tasks[0].difficulty}`)}
+                                            className="px-6 py-2 bg-white/5 hover:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded border border-white/10 hover:border-blue-500 transition-all opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0"
+                                        >
+                                            Deploy Sequence
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* BOX 2: TASK REPOSITORY (Sandbox) */}
+                    <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+                            <div><h2 className="text-white font-black text-lg uppercase tracking-widest">Task Repository</h2><p className="text-slate-400 text-sm">Open training sandbox (No time limits)</p></div>
+                        </div>
+                        <div className="grid grid-cols-12 gap-4 pb-3 border-b border-white/10 text-[10px] font-black tracking-[0.2em] uppercase text-slate-500 px-4">
+                            <div className="col-span-4">Scenario Name</div><div className="col-span-2 text-center">Category</div><div className="col-span-2 text-center">Difficulty</div><div className="col-span-2 text-right">High Score</div><div className="col-span-2 text-right">Avg Acc</div>
+                        </div>
+                        <div className="flex flex-col mt-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
+                            {trainingProtocols.map((protocol) => (
+                                <div key={protocol.uid} className="grid grid-cols-12 gap-4 py-4 px-4 items-center border-b border-white/5 hover:bg-white/[0.02] transition-colors group cursor-pointer" onClick={() => router.push(`/game?mode=${protocol.mode}&time=0&diff=${protocol.difficulty}`)}>
+                                    <div className="col-span-4 flex flex-col"><span className="text-white font-bold text-sm tracking-wide group-hover:text-[#3366FF] transition-colors">{protocol.name}</span><span className="text-slate-500 text-[10px] truncate pr-4">{protocol.desc}</span></div>
+                                    <div className="col-span-2 flex justify-center"><span className={`px-2 py-1 text-[9px] font-black uppercase tracking-widest border rounded-sm ${protocol.badgeColor}`}>{protocol.category}</span></div>
+                                    <div className="col-span-2 flex justify-center"><span className="px-2 py-1 text-[9px] font-mono text-slate-300 bg-white/5 border border-white/10 rounded">{protocol.difficulty}</span></div>
+                                    <div className="col-span-2 text-right"><span className="text-white font-mono text-sm font-bold">{protocol.highScore > 0 ? Math.round(protocol.highScore).toLocaleString() : '--'}</span></div>
+                                    <div className="col-span-2 text-right"><span className="text-emerald-400 font-mono text-sm font-bold">{protocol.avgAcc > 0 ? `${protocol.avgAcc.toFixed(1)}%` : '--'}</span></div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
                     {/* STAT GRID */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md">
-                            <span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Global Accuracy</span>
-                            <div className="flex items-baseline gap-2">
-                                <span className="text-3xl font-mono font-black text-white">{stats?.globalAccuracy.toFixed(1) || '0.0'}</span>
-                                <span className="text-red-500 font-bold">%</span>
-                            </div>
-                        </div>
-                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md">
-                            <span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Total Time</span>
-                            <div className="flex items-baseline gap-2">
-                                <span className="text-xl font-mono font-black text-white">{formatTime(stats?.timePlayedSeconds || 0)}</span>
-                            </div>
-                        </div>
-                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md">
-                            <span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Best Reaction Time</span>
-                            <div className="flex items-baseline gap-2">
-                                <span className="text-3xl font-mono font-black text-white">
-                                    {stats && Object.keys(stats.modes).length > 0
-                                        ? Math.round(Object.values(stats.modes).reduce((min, m) => m.bestReactionTime < min ? m.bestReactionTime : min, 9999))
-                                        : "-"}
-                                </span>
-                                <span className="text-cyan-400 font-bold text-sm">ms</span>
-                            </div>
-                        </div>
-                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md">
-                            <span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Last Deployment</span>
-                            <div className="flex items-baseline gap-2">
-                                <span className="text-lg font-bold text-white truncate">
-                                    {stats?.lastPlayedAt ? new Date(stats.lastPlayedAt).toLocaleDateString() : "Never"}
-                                </span>
-                            </div>
-                        </div>
+                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md"><span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Global Accuracy</span><div className="flex items-baseline gap-2"><span className="text-3xl font-mono font-black text-white">{stats?.globalAccuracy.toFixed(1) || '0.0'}</span><span className="text-red-500 font-bold">%</span></div></div>
+                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md"><span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Total Time</span><div className="flex items-baseline gap-2"><span className="text-xl font-mono font-black text-white">{formatTime(stats?.timePlayedSeconds || 0)}</span></div></div>
+                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md"><span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Best Reaction Time</span><div className="flex items-baseline gap-2"><span className="text-3xl font-mono font-black text-white">{stats && Object.keys(stats.modes).length > 0 ? Math.round(Object.values(stats.modes).reduce((min, m) => m.bestReactionTime < min ? m.bestReactionTime : min, 9999)) : "-"}</span><span className="text-cyan-400 font-bold text-sm">ms</span></div></div>
+                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md"><span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Last Deployment</span><div className="flex items-baseline gap-2"><span className="text-lg font-bold text-white truncate">{stats?.lastPlayedAt ? new Date(stats.lastPlayedAt).toLocaleDateString() : "Never"}</span></div></div>
                     </div>
                 </div>
             </div>
