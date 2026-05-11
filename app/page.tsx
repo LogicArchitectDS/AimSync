@@ -164,8 +164,9 @@ export default function Home() {
             src="/hero-bg.png"
             alt="AimSync training arena"
             fill
+            sizes="100vw"
             priority
-            className="object-cover object-center opacity-30"
+            className="object-cover object-center opacity-50"
           />
           {/* Dark gradient overlay */}
           <div className="absolute inset-0 bg-gradient-to-b from-background/60 via-background/20 to-background/90" />
