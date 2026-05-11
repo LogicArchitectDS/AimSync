@@ -14,6 +14,7 @@ const MODE_DURATION = 60;
 const FOV = 800; // Focal length
 const NEAR_PLANE = 0.1;
 const MAX_LIGHT_DISTANCE = 60; // How far the light reaches
+const MAX_STANDARD_DURATION = 60; // Cap for in-game modes
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; }
 interface EcholocationProps {
@@ -79,7 +80,7 @@ const projectToScreen = (p: Point3D, width: number, height: number) => {
     };
 };
 
-const drawDepthLine = (ctx: CanvasRenderingContext2D, w1: Point3D, w2: Point3D, yaw: number, pitch: number, width: number, height: number, baseColor: [number, number, number], maxDist = MAX_LIGHT_DISTANCE, lineWidth = 2) => {
+const drawDepthLine = (ctx: CanvasRenderingContext2D, w1: Point3D, w2: Point3D, yaw: number, pitch: number, width: number, height: number, baseColor: [number, number, number], maxDist = MAX_LIGHT_DISTANCE, lineWidth = 2, intensity = 1.0) => {
     const r1 = rotate3D(w1, yaw, pitch);
     const r2 = rotate3D(w2, yaw, pitch);
 
@@ -96,9 +97,13 @@ const drawDepthLine = (ctx: CanvasRenderingContext2D, w1: Point3D, w2: Point3D, 
 
     if (alpha1 <= 0 && alpha2 <= 0) return;
 
+    const r1Color = Math.min(255, Math.floor(baseColor[0] * intensity));
+    const g1Color = Math.min(255, Math.floor(baseColor[1] * intensity));
+    const b1Color = Math.min(255, Math.floor(baseColor[2] * intensity));
+
     const grad = ctx.createLinearGradient(p1.screenX, p1.screenY, p2.screenX, p2.screenY);
-    grad.addColorStop(0, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, ${alpha1})`);
-    grad.addColorStop(1, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, ${alpha2})`);
+    grad.addColorStop(0, `rgba(${r1Color}, ${g1Color}, ${b1Color}, ${alpha1})`);
+    grad.addColorStop(1, `rgba(${r1Color}, ${g1Color}, ${b1Color}, ${alpha2})`);
 
     ctx.strokeStyle = grad;
     ctx.lineWidth = lineWidth;
@@ -108,26 +113,41 @@ const drawDepthLine = (ctx: CanvasRenderingContext2D, w1: Point3D, w2: Point3D, 
     ctx.stroke();
 };
 
-// --- Wireframe Room Definition ---
-const ROOM_SIZE = 50;
+// --- Target Definitions ---
+
+// --- Wireframe Radial Sonar Grid ---
 const gridLines: [Point3D, Point3D][] = [];
-const GRID_STEP = 10;
-for (let i = -ROOM_SIZE; i <= ROOM_SIZE; i += GRID_STEP) {
-    gridLines.push([{x: -ROOM_SIZE, y: -ROOM_SIZE, z: i}, {x: ROOM_SIZE, y: -ROOM_SIZE, z: i}]);
-    gridLines.push([{x: i, y: -ROOM_SIZE, z: -ROOM_SIZE}, {x: i, y: -ROOM_SIZE, z: ROOM_SIZE}]);
-    gridLines.push([{x: -ROOM_SIZE, y: ROOM_SIZE, z: i}, {x: ROOM_SIZE, y: ROOM_SIZE, z: i}]);
-    gridLines.push([{x: i, y: ROOM_SIZE, z: -ROOM_SIZE}, {x: i, y: ROOM_SIZE, z: ROOM_SIZE}]);
-    gridLines.push([{x: -ROOM_SIZE, y: i, z: -ROOM_SIZE}, {x: ROOM_SIZE, y: i, z: -ROOM_SIZE}]);
-    gridLines.push([{x: i, y: -ROOM_SIZE, z: -ROOM_SIZE}, {x: i, y: ROOM_SIZE, z: -ROOM_SIZE}]);
-    gridLines.push([{x: -ROOM_SIZE, y: i, z: ROOM_SIZE}, {x: ROOM_SIZE, y: i, z: ROOM_SIZE}]);
-    gridLines.push([{x: i, y: -ROOM_SIZE, z: ROOM_SIZE}, {x: i, y: ROOM_SIZE, z: ROOM_SIZE}]);
-    gridLines.push([{x: -ROOM_SIZE, y: i, z: -ROOM_SIZE}, {x: -ROOM_SIZE, y: i, z: ROOM_SIZE}]);
-    gridLines.push([{x: -ROOM_SIZE, y: -ROOM_SIZE, z: i}, {x: -ROOM_SIZE, y: ROOM_SIZE, z: i}]);
-    gridLines.push([{x: ROOM_SIZE, y: i, z: -ROOM_SIZE}, {x: ROOM_SIZE, y: i, z: ROOM_SIZE}]);
-    gridLines.push([{x: ROOM_SIZE, y: -ROOM_SIZE, z: i}, {x: ROOM_SIZE, y: ROOM_SIZE, z: i}]);
+const NUM_RINGS = 10;
+const RADIUS_STEP = 12;
+const FLOOR_Y = -30;
+const CEIL_Y = 30;
+const NUM_SPOKES = 16;
+
+for (let r = 1; r <= NUM_RINGS; r++) {
+    const radius = r * RADIUS_STEP;
+    const segments = 32;
+    for (let i = 0; i < segments; i++) {
+        const a1 = (i / segments) * Math.PI * 2;
+        const a2 = ((i + 1) / segments) * Math.PI * 2;
+        const x1 = Math.cos(a1) * radius;
+        const z1 = Math.sin(a1) * radius;
+        const x2 = Math.cos(a2) * radius;
+        const z2 = Math.sin(a2) * radius;
+
+        gridLines.push([{x: x1, y: FLOOR_Y, z: z1}, {x: x2, y: FLOOR_Y, z: z2}]);
+        gridLines.push([{x: x1, y: CEIL_Y, z: z1}, {x: x2, y: CEIL_Y, z: z2}]);
+    }
 }
 
-// --- Target Drawing Logic will use 3D Spheres ---
+for (let i = 0; i < NUM_SPOKES; i++) {
+    const angle = (i / NUM_SPOKES) * Math.PI * 2;
+    const maxRadius = NUM_RINGS * RADIUS_STEP;
+    const x = Math.cos(angle) * maxRadius;
+    const z = Math.sin(angle) * maxRadius;
+
+    gridLines.push([{x: 0, y: FLOOR_Y, z: 0}, {x: x, y: FLOOR_Y, z: z}]);
+    gridLines.push([{x: 0, y: CEIL_Y, z: 0}, {x: x, y: CEIL_Y, z: z}]);
+}
 
 export default function Echolocation({ overrideSettings, onFinish }: EcholocationProps) {
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -139,6 +159,8 @@ export default function Echolocation({ overrideSettings, onFinish }: Echolocatio
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
 
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
+    const [durationSeconds, setDurationSeconds] = useState<number>(overrideSettings?.duration ?? 30);
+    const effectiveDuration = overrideSettings?.duration ?? durationSeconds;
     const [sensitivity, setSensitivity] = useState<number>(1.0);
     const config = difficultyConfig[difficulty];
     const { isTrial } = { isTrial: false }; // Placeholder for auth if needed, but drillConfig handles locking
@@ -147,7 +169,7 @@ export default function Echolocation({ overrideSettings, onFinish }: Echolocatio
     const [phase, setPhase] = useState<Phase>("PRE_MENU");
     const [countdown, setCountdown] = useState(3);
 
-    const [timeLeft, setTimeLeft] = useState(MODE_DURATION);
+    const [timeLeft, setTimeLeft] = useState(effectiveDuration);
     const [target, setTarget] = useState<SphericalTarget | null>(null);
     const [score, setScore] = useState(0);
     const [hits, setHits] = useState(0);
@@ -319,9 +341,29 @@ export default function Echolocation({ overrideSettings, onFinish }: Echolocatio
             const yaw = cameraYawRef.current;
             const pitch = cameraPitchRef.current;
 
-            // Draw depth-faded wireframe room
+            // Render Sonar Grid with Sweep Effect
+            const time = performance.now() / 1000;
+            const sweepAngle = (time * 1.5) % (Math.PI * 2);
+
             gridLines.forEach(([w1, w2]) => {
-                drawDepthLine(ctx, w1, w2, yaw, pitch, renderDimensions.width, renderDimensions.height, [6, 182, 212], MAX_LIGHT_DISTANCE, 1);
+                const midX = (w1.x + w2.x) / 2;
+                const midZ = (w1.z + w2.z) / 2;
+                const angle = Math.atan2(midZ, midX);
+                let angleDiff = sweepAngle - angle;
+                
+                while (angleDiff < 0) angleDiff += Math.PI * 2;
+                while (angleDiff > Math.PI * 2) angleDiff -= Math.PI * 2;
+
+                let intensity = 1.0;
+                if (angleDiff < 0.6) {
+                    intensity = 1.0 + (0.6 - angleDiff) * 3; 
+                } else if (angleDiff > Math.PI * 2 - 0.1) {
+                    intensity = 1.5;
+                } else {
+                    intensity = 0.2; 
+                }
+
+                drawDepthLine(ctx, w1, w2, yaw, pitch, renderDimensions.width, renderDimensions.height, [6, 182, 212], MAX_LIGHT_DISTANCE, 1, intensity);
             });
 
             // Draw 3D Target
@@ -410,7 +452,7 @@ export default function Echolocation({ overrideSettings, onFinish }: Echolocatio
         clearTargetTimeout();
         const currentSession = sessionIdxRef.current;
         const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
-        const baseRadius = getScaledRadius(config.targetRadius, difficulty, elapsedSec, MODE_DURATION);
+        const baseRadius = getScaledRadius(config.targetRadius, difficulty, elapsedSec, effectiveDuration);
 
         // Target should spawn OUTSIDE front FOV (so relative yaw > FOV/2)
         const yawOffset = (60 + Math.random() * 120) * (Math.random() > 0.5 ? 1 : -1);
@@ -505,7 +547,7 @@ export default function Echolocation({ overrideSettings, onFinish }: Echolocatio
                 score,
                 hits,
                 misses,
-                duration: MODE_DURATION,
+                duration: effectiveDuration,
                 reactionTimes,
             });
             updateStatsWithResult(resultData);
@@ -519,7 +561,7 @@ export default function Echolocation({ overrideSettings, onFinish }: Echolocatio
         clearTargetTimeout();
         setPhase("PRE_MENU");
         setCountdown(3);
-        setTimeLeft(MODE_DURATION);
+        setTimeLeft(effectiveDuration);
         setTarget(null);
         setScore(0);
         setHits(0);
@@ -563,7 +605,7 @@ export default function Echolocation({ overrideSettings, onFinish }: Echolocatio
                         </div>
 
                         <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4 text-left">
+                            <div className="grid grid-cols-3 gap-4 text-left">
                                 <div className="flex flex-col">
                                     <label className="text-gray-400 text-xs font-bold tracking-wider uppercase mb-2">Difficulty</label>
                                     <select 
@@ -574,6 +616,19 @@ export default function Echolocation({ overrideSettings, onFinish }: Echolocatio
                                         {Object.entries(difficultyLabels).map(([key, label]) => (
                                             <option key={key} value={key}>{label.toUpperCase()}</option>
                                         ))}
+                                    </select>
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-gray-400 text-xs font-bold tracking-wider uppercase mb-2">Duration</label>
+                                    <select
+                                        value={durationSeconds}
+                                        onChange={(e) => setDurationSeconds(Number(e.target.value))}
+                                        className="bg-black/80 border border-white/20 p-3 rounded-lg text-white focus:border-[#06b6d4] outline-none transition-all cursor-pointer"
+                                    >
+                                        {!overrideSettings && <option value={15}>15s (Warmup)</option>}
+                                        <option value={30}>30s (Standard)</option>
+                                        {!overrideSettings && <option value={45}>45s (Extended)</option>}
+                                        <option value={60}>60s (Endurance)</option>
                                     </select>
                                 </div>
                                 <div className="flex flex-col">

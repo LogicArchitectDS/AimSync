@@ -415,6 +415,9 @@ export default function CognitiveOverdrive({ overrideSettings, onFinish }: Cogni
                                             <option value={15} disabled={isTrial}>15s (Warmup)</option>
                                         )}
                                         <option value={30}>30s (Standard)</option>
+                                        {!overrideSettings && (
+                                            <option value={45}>45s (Extended)</option>
+                                        )}
                                         <option value={60} disabled={isTrial}>60s (Endurance)</option>
                                     </select>
                                 </label>

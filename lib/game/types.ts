@@ -40,6 +40,7 @@ export interface GameResult {
 // 2. The Aggregated Profile (For the Dashboard)
 export interface ModeStats {
     gamesPlayed: number;
+    timePlayedSeconds: number;
     highScore: number;
     averageScore: number;
     averageAccuracy: number;
@@ -53,8 +54,10 @@ export interface UserStats {
     timePlayedSeconds: number;
     lastPlayedAt: string | null;
     modes: Record<string, ModeStats>; // Maps modeId -> ModeStats
+    completedTasks?: string[];
+    xp?: number;
+    level?: number;
 }
-
 // 3. The Custom Training System
 export interface RoutineStep {
     id: string;

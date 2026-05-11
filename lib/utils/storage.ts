@@ -53,6 +53,13 @@ export const StorageEngine = {
         existing.push(result);
         localStorage.setItem(STORAGE_KEYS.RESULTS, JSON.stringify(existing));
 
+        // Mark task as completed if present in URL
+        const params = new URLSearchParams(window.location.search);
+        const taskId = params.get('taskId');
+        if (taskId) {
+            StorageEngine.markTaskCompleted(taskId);
+        }
+
         // Immediately trigger profile aggregation
         StorageEngine.updateUserStats(result);
     },
@@ -76,11 +83,20 @@ export const StorageEngine = {
             timePlayedSeconds: 0,
             lastPlayedAt: null,
             modes: {},
+            completedTasks: [],
+            xp: 0,
+            level: 1,
         };
 
         if (!isBrowser) return defaultStats;
         const data = localStorage.getItem(STORAGE_KEYS.STATS);
-        return data ? JSON.parse(data) : defaultStats;
+        if (data) {
+            const parsed = JSON.parse(data);
+            if (typeof parsed.xp === 'undefined') parsed.xp = 0;
+            if (typeof parsed.level === 'undefined') parsed.level = 1;
+            return parsed;
+        }
+        return defaultStats;
     },
 
     updateUserStats: (newResult: GameResult): void => {
@@ -99,6 +115,7 @@ export const StorageEngine = {
         if (!stats.modes[newResult.modeId]) {
             stats.modes[newResult.modeId] = {
                 gamesPlayed: 0,
+                timePlayedSeconds: 0,
                 highScore: 0,
                 averageScore: 0,
                 averageAccuracy: 0,
@@ -108,6 +125,7 @@ export const StorageEngine = {
 
         const modeStats = stats.modes[newResult.modeId];
         modeStats.gamesPlayed += 1;
+        modeStats.timePlayedSeconds = (modeStats.timePlayedSeconds || 0) + newResult.durationSeconds;
         modeStats.highScore = Math.max(modeStats.highScore, newResult.score);
         modeStats.averageScore = ((modeStats.averageScore * (modeStats.gamesPlayed - 1)) + newResult.score) / modeStats.gamesPlayed;
         modeStats.averageAccuracy = ((modeStats.averageAccuracy * (modeStats.gamesPlayed - 1)) + newResult.accuracy) / modeStats.gamesPlayed;
@@ -116,7 +134,37 @@ export const StorageEngine = {
             modeStats.bestReactionTime = Math.min(modeStats.bestReactionTime, newResult.bestReactionTime);
         }
 
+        // 3. Update XP and Level
+        const baseXP = Math.floor(newResult.score / 50) + Math.floor(newResult.durationSeconds / 2);
+        stats.xp = (stats.xp || 0) + baseXP;
+        stats.level = Math.floor(Math.sqrt(stats.xp / 100)) + 1;
+
         localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(stats));
+    },
+
+    markTaskCompleted: (taskId: string) => {
+        if (!isBrowser) return;
+        const stats = StorageEngine.getUserStats();
+        if (!stats.completedTasks) stats.completedTasks = [];
+        if (!stats.completedTasks.includes(taskId)) {
+            stats.completedTasks.push(taskId);
+
+            // Grant Task XP
+            const isWeekly = taskId.includes("weekly");
+            const taskXp = isWeekly ? 500 : 200;
+            stats.xp = (stats.xp || 0) + taskXp;
+            stats.level = Math.floor(Math.sqrt(stats.xp / 100)) + 1;
+
+            localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(stats));
+        }
+    },
+
+    getTotalGamesPlayed: (): number => {
+        return StorageEngine.getUserStats().totalGamesPlayed;
+    },
+
+    getTotalPlaytimeSeconds: (): number => {
+        return StorageEngine.getUserStats().timePlayedSeconds;
     },
 
     // --- ROUTINES ---

@@ -334,6 +334,7 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
                                     <select value={durationSeconds} onChange={(e) => setDurationSeconds(Number(e.target.value))} className="bg-black/80 border border-white/20 p-4 rounded-xl text-white focus:border-[#3366FF] outline-none transition-all cursor-pointer">
                                         {!overrideSettings && <option value={15}>15s (Warmup)</option>}
                                         <option value={30}>30s (Standard)</option>
+                                        {!overrideSettings && <option value={45}>45s (Extended)</option>}
                                         <option value={60}>60s (Endurance)</option>
                                     </select>
                                 </label>

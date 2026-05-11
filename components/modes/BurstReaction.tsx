@@ -205,7 +205,10 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
                                     </select></label>
                                 <label className="flex flex-col text-left flex-1"><span className="text-gray-400 text-xs font-bold tracking-wider mb-2">DURATION</span>
                                     <select value={durationSeconds} onChange={(e) => setDurationSeconds(Number(e.target.value))} className="bg-black/80 border border-white/20 p-4 rounded-xl text-white focus:border-orange-500 outline-none transition-all cursor-pointer">
-                                        {!overrideSettings && <option value={15}>15s (Warmup)</option>}<option value={30}>30s (Standard)</option><option value={60}>60s (Endurance)</option>
+                                        {!overrideSettings && <option value={15}>15s (Warmup)</option>}
+                                        <option value={30}>30s (Standard)</option>
+                                        {!overrideSettings && <option value={45}>45s (Extended)</option>}
+                                        <option value={60}>60s (Endurance)</option>
                                     </select></label>
                             </div>
                             <button onClick={startGame} className="w-full mt-8 px-12 py-5 bg-white text-[#121212] text-lg font-black tracking-[0.2em] rounded-xl hover:bg-orange-500 hover:text-white transition-all">INITIALIZE SEQUENCE</button>

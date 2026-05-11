@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useRef } from "react";
+import { useAuth } from "@/lib/contexts/AuthContext";
 
 /* ---------- animated grid canvas ---------- */
 function GridCanvas() {
@@ -154,6 +155,7 @@ function StatChip({ value, label }: { value: string; label: string }) {
 
 /* ---------- main page ---------- */
 export default function Home() {
+  const { user, isTrial } = useAuth();
   return (
     <div className="min-h-screen flex flex-col bg-background selection:bg-red/30">
       {/* ═══ HERO SECTION ═══ */}
@@ -201,19 +203,26 @@ export default function Home() {
             <Link href="#plus" className="hover:text-white transition-colors">
               Plus+
             </Link>
-            <Link href="#blog" className="hover:text-white transition-colors">
-              Blog
-            </Link>
           </div>
 
           {/* Right side: sign in */}
           <div className="flex items-center gap-4">
-            <Link
-              href="/auth/login"
-              className="text-slate-300 px-5 py-2 text-sm font-bold uppercase tracking-widest hover:text-white transition-all duration-200"
-            >
-              Login
-            </Link>
+            {user || isTrial ? (
+              <Link href="/dashboard" className="flex items-center justify-center w-10 h-10 rounded-full border-2 border-red overflow-hidden hover:scale-105 transition-transform bg-black shadow-[0_0_15px_rgba(239,68,68,0.3)]">
+                {user?.profilePhoto ? (
+                  <img src={user.profilePhoto} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-sm font-black text-white">{isTrial ? "T" : (user?.username?.charAt(0) || "U")}</span>
+                )}
+              </Link>
+            ) : (
+              <Link
+                href="/auth/login"
+                className="text-slate-300 px-5 py-2 text-sm font-bold uppercase tracking-widest hover:text-white transition-all duration-200"
+              >
+                Login
+              </Link>
+            )}
           </div>
         </nav>
 
@@ -444,67 +453,6 @@ export default function Home() {
               <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Accuracy</p>
               <p className="text-2xl font-black text-white font-mono">92.4<span className="text-sm text-red">%</span></p>
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ═══ LATEST NEWS / BLOG ═══ */}
-      <section id="blog" className="relative z-10 border-y border-white/5 bg-surface/40 py-32">
-        <div className="max-w-7xl mx-auto px-8 md:px-16 w-full">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-16">
-            <div>
-              <h2 className="text-4xl md:text-5xl font-black uppercase tracking-tighter text-white">
-                LATEST <span className="text-red">NEWS</span>
-              </h2>
-              <p className="text-slate-400 mt-2">Updates, patch notes, and pro aim guides.</p>
-            </div>
-            <Link
-              href="/dashboard"
-              className="text-sm font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-colors"
-            >
-              View all posts &rarr;
-            </Link>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[
-              {
-                title: "AimSync V0.2.1: The Physics Update",
-                date: "April 2, 2026",
-                category: "Patch Notes",
-                img: "/hero-bg.png"
-              },
-              {
-                title: "Mastering Micro-Adjustments in CS2",
-                date: "March 28, 2026",
-                category: "Guide",
-                img: "/hero-bg.png"
-              },
-              {
-                title: "How to find your perfect Valorant Sens",
-                date: "March 15, 2026",
-                category: "Guide",
-                img: "/hero-bg.png"
-              }
-            ].map((post, i) => (
-              <div key={i} className="group relative flex flex-col rounded-xl overflow-hidden border border-white/10 bg-black/50 hover:border-white/30 transition-colors">
-                <div className="relative h-48 w-full overflow-hidden">
-                  <div className="absolute inset-0 bg-red/20 group-hover:bg-transparent transition-colors z-10 mix-blend-overlay" />
-                  <Image src={post.img} alt={post.title} fill className="object-cover object-center grayscale opacity-60 group-hover:grayscale-0 group-hover:scale-105 transition-all duration-500" />
-                </div>
-                <div className="p-6 flex flex-col flex-1">
-                  <div className="flex items-center gap-3 mb-4">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-red">{post.category}</span>
-                    <span className="w-1 h-1 rounded-full bg-slate-600" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{post.date}</span>
-                  </div>
-                  <h3 className="text-lg font-black uppercase tracking-tight text-white group-hover:text-red transition-colors mb-4">{post.title}</h3>
-                  <Link href="/dashboard" className="mt-auto text-xs font-bold uppercase tracking-widest text-slate-400 group-hover:text-white transition-colors">
-                    Read Post
-                  </Link>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       </section>

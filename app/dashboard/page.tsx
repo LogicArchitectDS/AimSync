@@ -178,6 +178,8 @@ export default function DashboardPage() {
                 difficulty: diff,
                 highScore: stats?.modes?.[base.mode]?.highScore || 0,
                 avgAcc: stats?.modes?.[base.mode]?.averageAccuracy || 0,
+                gamesPlayed: stats?.modes?.[base.mode]?.gamesPlayed || 0,
+                timePlayedSeconds: stats?.modes?.[base.mode]?.timePlayedSeconds || 0,
             }))
         );
     }, [stats]);
@@ -199,6 +201,14 @@ export default function DashboardPage() {
     }
 
     const rankInfo = getRankInfo(stats);
+
+    const currentLevel = stats.level || 1;
+    const currentXp = stats.xp || 0;
+    const prevLevelXp = Math.pow(currentLevel - 1, 2) * 100;
+    const nextLevelXp = Math.pow(currentLevel, 2) * 100;
+    const xpProgress = currentXp - prevLevelXp;
+    const xpRequired = nextLevelXp - prevLevelXp;
+    const xpPercentage = Math.min(100, Math.max(0, (xpProgress / xpRequired) * 100));
 
     return (
         <div className="flex flex-col gap-8 w-full relative">
@@ -280,6 +290,24 @@ export default function DashboardPage() {
                         </div>
                         <h2 className="text-xl font-black tracking-widest text-white mb-1">{isTrial ? "Trial Agent" : (user?.username || "Agent_01")}</h2>
                         <p className={`text-xs font-bold uppercase tracking-[0.2em] ${rankInfo.color} mb-6`}>{isTrial ? "Guest Protocol" : rankInfo.tier}</p>
+                        
+                        {/* --- XP BAR --- */}
+                        <div className="w-full bg-black/50 border border-white/10 rounded-lg p-4 mb-6 relative overflow-hidden">
+                            <div className="flex justify-between items-end mb-2 relative z-10">
+                                <div className="flex items-baseline gap-2">
+                                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Level</span>
+                                    <span className="text-2xl font-black text-white">{currentLevel}</span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-bold tracking-widest">{currentXp.toLocaleString()} / {nextLevelXp.toLocaleString()} XP</span>
+                            </div>
+                            <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden relative z-10">
+                                <div 
+                                    className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)] transition-all duration-1000" 
+                                    style={{ width: `${xpPercentage}%` }}
+                                />
+                            </div>
+                        </div>
+
                         <div className="w-full h-px bg-white/5 mb-4" />
                         <button onClick={logout} className="w-full py-2 mb-6 border border-white/5 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-white hover:bg-red-500 transition-all">Sign Out Terminal</button>
                         <div className="w-full grid grid-cols-2 gap-4 text-left">
@@ -294,59 +322,93 @@ export default function DashboardPage() {
                 <div className="lg:col-span-8 flex flex-col gap-6">
 
                     {/* BOX 1: ACTIVE OPERATIONS */}
-                    <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+                    <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md relative overflow-hidden">
+                        {/* Background glow effect for the panel */}
+                        <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 rounded-full blur-[80px] pointer-events-none" />
+
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4 relative z-10">
                             <div><h2 className="text-white font-black text-lg uppercase tracking-widest">Active Operations</h2><p className="text-slate-400 text-sm">Time-sensitive training contracts</p></div>
                         </div>
-                        <div className="mb-8">
-                            <div className="flex items-center gap-3 mb-4 px-2">
+                        <div className="mb-8 relative z-10">
+                            <div className="flex items-center gap-3 mb-2 px-2">
                                 <div className="h-2 w-2 bg-blue-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.8)]" />
                                 <h3 className="text-white font-black tracking-[0.2em] uppercase text-xs">Daily Contracts</h3>
-                                <span className="text-slate-500 text-[10px] font-mono ml-auto">Rotates Daily</span>
+                                <span className="text-slate-500 text-[10px] font-mono ml-auto">
+                                    {activeTasks.daily.filter(t => stats?.completedTasks?.includes(t.id)).length} / {activeTasks.daily.length} Completed
+                                </span>
+                            </div>
+                            <div className="w-full bg-white/5 h-1 mb-4 rounded-full overflow-hidden">
+                                <div className="bg-gradient-to-r from-blue-600 to-blue-400 h-full transition-all duration-1000 ease-out" style={{ width: `${(activeTasks.daily.filter(t => stats?.completedTasks?.includes(t.id)).length / activeTasks.daily.length) * 100}%` }} />
                             </div>
                             <div className="flex flex-col gap-2">
-                                {activeTasks.daily.map((task) => (
-                                    <div key={task.id} className="group relative bg-[#121212]/50 border border-white/5 rounded-lg p-4 hover:border-blue-500/50 transition-colors cursor-pointer overflow-hidden">
-                                        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/0 to-blue-500/5 group-hover:to-blue-500/20 transition-all pointer-events-none" />
-                                        <div className="flex justify-between items-center relative z-10">
-                                            <div>
-                                                <h4 className="text-white font-bold text-sm tracking-wide group-hover:text-blue-400 transition-colors">{task.name}</h4>
-                                                <p className="text-slate-500 text-[11px] mt-1">{task.desc}</p>
-                                                <div className="flex gap-3 mt-3">
-                                                    <span className="text-[9px] font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded border border-white/10">⏱ {task.timeLimit}s</span>
-                                                    <span className="text-[9px] font-mono text-orange-400 bg-orange-400/10 px-2 py-0.5 rounded border border-orange-400/20">⚡ {task.difficulty}</span>
-                                                    <span className="text-[9px] font-mono text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded border border-purple-400/20">✨ +{task.xpReward} XP</span>
+                                {activeTasks.daily.map((task) => {
+                                    const isCompleted = stats?.completedTasks?.includes(task.id);
+                                    return (
+                                        <div key={task.id} className={`group relative bg-[#121212]/50 border ${isCompleted ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/5 hover:border-blue-500/50'} rounded-lg p-4 transition-colors overflow-hidden`}>
+                                            <div className={`absolute inset-0 bg-gradient-to-r ${isCompleted ? 'from-emerald-500/0 via-emerald-500/0 to-emerald-500/5' : 'from-blue-500/0 via-blue-500/0 to-blue-500/5 group-hover:to-blue-500/20'} transition-all pointer-events-none`} />
+                                            <div className="flex justify-between items-center relative z-10">
+                                                <div className="flex items-start gap-4">
+                                                    <div className={`mt-1 w-5 h-5 rounded flex shrink-0 items-center justify-center border transition-all ${isCompleted ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]' : 'bg-white/5 border-white/10 text-transparent group-hover:border-blue-500/50'}`}>
+                                                        {isCompleted && <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
+                                                    </div>
+                                                    <div>
+                                                        <h4 className={`font-bold text-sm tracking-wide transition-colors ${isCompleted ? 'text-emerald-400' : 'text-white group-hover:text-blue-400'}`}>{task.name}</h4>
+                                                        <p className="text-slate-500 text-[11px] mt-1">{task.desc}</p>
+                                                        <div className="flex gap-3 mt-3">
+                                                            <span className="text-[9px] font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded border border-white/10">⏱ {task.timeLimit}s</span>
+                                                            <span className="text-[9px] font-mono text-orange-400 bg-orange-400/10 px-2 py-0.5 rounded border border-orange-400/20">⚡ {task.difficulty}</span>
+                                                            {!isCompleted && <span className="text-[9px] font-mono text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded border border-purple-400/20">✨ +{task.xpReward} XP</span>}
+                                                        </div>
+                                                    </div>
                                                 </div>
+                                                <button onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}&taskId=${task.id}`)} className={`px-6 py-2 text-[10px] font-black uppercase tracking-widest rounded border transition-all ${isCompleted ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 opacity-100' : 'bg-white/5 hover:bg-blue-600 text-white border-white/10 hover:border-blue-500 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0'}`}>
+                                                    {isCompleted ? "Replay" : "Deploy"}
+                                                </button>
                                             </div>
-                                            <button onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}`)} className="px-6 py-2 bg-white/5 hover:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded border border-white/10 hover:border-blue-500 transition-all opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0">Deploy</button>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
-                        <div>
-                            <div className="flex items-center gap-3 mb-4 px-2">
+                        <div className="relative z-10">
+                            <div className="flex items-center gap-3 mb-2 px-2">
                                 <div className="h-2 w-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]" />
                                 <h3 className="text-white font-black tracking-[0.2em] uppercase text-xs">Weekly Operation</h3>
+                                <span className="text-slate-500 text-[10px] font-mono ml-auto">
+                                    {activeTasks.weekly.filter(t => stats?.completedTasks?.includes(t.id)).length} / {activeTasks.weekly.length} Completed
+                                </span>
+                            </div>
+                            <div className="w-full bg-white/5 h-1 mb-4 rounded-full overflow-hidden">
+                                <div className="bg-gradient-to-r from-red-600 to-red-400 h-full transition-all duration-1000 ease-out" style={{ width: `${(activeTasks.weekly.filter(t => stats?.completedTasks?.includes(t.id)).length / activeTasks.weekly.length) * 100}%` }} />
                             </div>
                             <div className="flex flex-col gap-2">
-                                {activeTasks.weekly.map((task) => (
-                                    <div key={task.id} className="group relative bg-[#121212]/50 border border-white/5 rounded-lg p-4 hover:border-red-500/50 transition-colors cursor-pointer overflow-hidden">
-                                        <div className="absolute inset-0 bg-gradient-to-r from-red-500/0 via-red-500/0 to-red-500/5 group-hover:to-red-500/20 transition-all pointer-events-none" />
-                                        <div className="flex justify-between items-center relative z-10">
-                                            <div>
-                                                <h4 className="text-white font-bold text-sm tracking-wide group-hover:text-red-400 transition-colors">{task.name}</h4>
-                                                <p className="text-slate-500 text-[11px] mt-1">{task.desc}</p>
-                                                <div className="flex gap-3 mt-3">
-                                                    <span className="text-[9px] font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded border border-white/10">⏱ {task.timeLimit}s</span>
-                                                    <span className="text-[9px] font-mono text-red-400 bg-red-400/10 px-2 py-0.5 rounded border border-red-400/20">💀 {task.difficulty}</span>
-                                                    <span className="text-[9px] font-mono text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded border border-purple-400/20">✨ +{task.xpReward} XP</span>
+                                {activeTasks.weekly.map((task) => {
+                                    const isCompleted = stats?.completedTasks?.includes(task.id);
+                                    return (
+                                        <div key={task.id} className={`group relative bg-[#121212]/50 border ${isCompleted ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/20 hover:border-red-500/50'} rounded-lg p-5 transition-colors overflow-hidden shadow-[0_0_15px_rgba(239,68,68,0.05)]`}>
+                                            <div className={`absolute inset-0 bg-gradient-to-r ${isCompleted ? 'from-emerald-500/0 via-emerald-500/0 to-emerald-500/5' : 'from-red-500/0 via-red-500/0 to-red-500/5 group-hover:to-red-500/20'} transition-all pointer-events-none`} />
+                                            <div className="flex justify-between items-center relative z-10">
+                                                <div className="flex items-start gap-4">
+                                                    <div className={`mt-1 w-6 h-6 rounded flex shrink-0 items-center justify-center border transition-all ${isCompleted ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]' : 'bg-red-500/10 border-red-500/30 text-transparent group-hover:border-red-500/50'}`}>
+                                                        {isCompleted && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
+                                                    </div>
+                                                    <div>
+                                                        <h4 className={`font-bold text-base tracking-wide transition-colors ${isCompleted ? 'text-emerald-400' : 'text-white group-hover:text-red-400'}`}>{task.name}</h4>
+                                                        <p className="text-slate-400 text-xs mt-1">{task.desc}</p>
+                                                        <div className="flex gap-3 mt-4">
+                                                            <span className="text-[10px] font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded border border-white/10">⏱ {task.timeLimit}s</span>
+                                                            <span className="text-[10px] font-mono text-red-400 bg-red-400/10 px-2 py-0.5 rounded border border-red-400/20">💀 {task.difficulty}</span>
+                                                            {!isCompleted && <span className="text-[10px] font-mono text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded border border-purple-400/20">✨ +{task.xpReward} XP</span>}
+                                                        </div>
+                                                    </div>
                                                 </div>
+                                                <button onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}&taskId=${task.id}`)} className={`px-8 py-3 text-[11px] font-black uppercase tracking-widest rounded border transition-all ${isCompleted ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 opacity-100' : 'bg-red-600/20 hover:bg-red-600 text-white border-red-500/30 hover:border-red-500 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0 shadow-[0_0_15px_rgba(239,68,68,0.2)]'}`}>
+                                                    {isCompleted ? "Replay" : "Deploy"}
+                                                </button>
                                             </div>
-                                            <button onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}`)} className="px-6 py-2 bg-white/5 hover:bg-red-600 text-white text-[10px] font-black uppercase tracking-widest rounded border border-white/10 hover:border-red-500 transition-all opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0">Deploy</button>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
@@ -399,14 +461,15 @@ export default function DashboardPage() {
                             <div><h2 className="text-white font-black text-lg uppercase tracking-widest">Task Repository</h2><p className="text-slate-400 text-sm">Open training sandbox (No time limits)</p></div>
                         </div>
                         <div className="grid grid-cols-12 gap-4 pb-3 border-b border-white/10 text-[10px] font-black tracking-[0.2em] uppercase text-slate-500 px-4">
-                            <div className="col-span-4">Scenario Name</div><div className="col-span-2 text-center">Category</div><div className="col-span-2 text-center">Difficulty</div><div className="col-span-2 text-right">High Score</div><div className="col-span-2 text-right">Avg Acc</div>
+                            <div className="col-span-3">Scenario Name</div><div className="col-span-2 text-center">Category</div><div className="col-span-1 text-center">Diff</div><div className="col-span-2 text-center">Plays / Time</div><div className="col-span-2 text-right">High Score</div><div className="col-span-2 text-right">Avg Acc</div>
                         </div>
                         <div className="flex flex-col mt-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
                             {trainingProtocols.map((protocol) => (
                                 <div key={protocol.uid} className="grid grid-cols-12 gap-4 py-4 px-4 items-center border-b border-white/5 hover:bg-white/[0.02] transition-colors group cursor-pointer" onClick={() => router.push(`/game?mode=${protocol.mode}&time=0&diff=${protocol.difficulty}`)}>
-                                    <div className="col-span-4 flex flex-col"><span className="text-white font-bold text-sm tracking-wide group-hover:text-[#3366FF] transition-colors">{protocol.name}</span><span className="text-slate-500 text-[10px] truncate pr-4">{protocol.desc}</span></div>
+                                    <div className="col-span-3 flex flex-col"><span className="text-white font-bold text-sm tracking-wide group-hover:text-[#3366FF] transition-colors truncate">{protocol.name}</span><span className="text-slate-500 text-[10px] truncate pr-2">{protocol.desc}</span></div>
                                     <div className="col-span-2 flex justify-center"><span className={`px-2 py-1 text-[9px] font-black uppercase tracking-widest border rounded-sm ${protocol.badgeColor}`}>{protocol.category}</span></div>
-                                    <div className="col-span-2 flex justify-center"><span className="px-2 py-1 text-[9px] font-mono text-slate-300 bg-white/5 border border-white/10 rounded">{protocol.difficulty}</span></div>
+                                    <div className="col-span-1 flex justify-center"><span className="px-2 py-1 text-[9px] font-mono text-slate-300 bg-white/5 border border-white/10 rounded truncate">{protocol.difficulty}</span></div>
+                                    <div className="col-span-2 flex flex-col items-center"><span className="text-white font-mono text-xs">{protocol.gamesPlayed}</span><span className="text-slate-500 text-[10px]">{formatTime(protocol.timePlayedSeconds)}</span></div>
                                     <div className="col-span-2 text-right"><span className="text-white font-mono text-sm font-bold">{protocol.highScore > 0 ? Math.round(protocol.highScore).toLocaleString() : '--'}</span></div>
                                     <div className="col-span-2 text-right"><span className="text-emerald-400 font-mono text-sm font-bold">{protocol.avgAcc > 0 ? `${protocol.avgAcc.toFixed(1)}%` : '--'}</span></div>
                                 </div>
