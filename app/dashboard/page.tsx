@@ -290,7 +290,7 @@ export default function DashboardPage() {
                         </div>
                         <h2 className="text-xl font-black tracking-widest text-white mb-1">{isTrial ? "Trial Agent" : (user?.username || "Agent_01")}</h2>
                         <p className={`text-xs font-bold uppercase tracking-[0.2em] ${rankInfo.color} mb-6`}>{isTrial ? "Guest Protocol" : rankInfo.tier}</p>
-                        
+
                         {/* --- XP BAR --- */}
                         <div className="w-full bg-black/50 border border-white/10 rounded-lg p-4 mb-6 relative overflow-hidden">
                             <div className="flex justify-between items-end mb-2 relative z-10">
@@ -301,8 +301,8 @@ export default function DashboardPage() {
                                 <span className="text-[10px] text-slate-400 font-bold tracking-widest">{currentXp.toLocaleString()} / {nextLevelXp.toLocaleString()} XP</span>
                             </div>
                             <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden relative z-10">
-                                <div 
-                                    className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)] transition-all duration-1000" 
+                                <div
+                                    className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)] transition-all duration-1000"
                                     style={{ width: `${xpPercentage}%` }}
                                 />
                             </div>
@@ -444,7 +444,7 @@ export default function DashboardPage() {
                                         <button
                                             // TODO: To play sequentially, we need an Engine Playlist Controller!
                                             // For now, it just boots the very first task in the array.
-                                            onClick={() => router.push(`/game?mode=${playlist.tasks[0].mode}&time=${playlist.tasks[0].timeLimit}&diff=${playlist.tasks[0].difficulty}`)}
+                                            onClick={() => router.push(`/game?playlist=${playlist.id}`)}
                                             className="px-6 py-2 bg-white/5 hover:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded border border-white/10 hover:border-blue-500 transition-all opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0"
                                         >
                                             Deploy Sequence

@@ -8,10 +8,11 @@ interface TargetProps {
     id: number;
     position: [number, number, number];
     onHit: (id: number) => void;
+    scale: number;
 }
 
 // 1. The Individual Target Component
-function Target({ id, position, onHit }: TargetProps) {
+function Target({ id, position, onHit, scale }: TargetProps) {
     return (
         <mesh
             position={position}
@@ -20,14 +21,14 @@ function Target({ id, position, onHit }: TargetProps) {
             // so the Raycaster in GameCanvas can trigger it upon a ballistic impact!
             userData={{ id, onHit }}
         >
-            <sphereGeometry args={[0.5, 32, 32]} />
+            <sphereGeometry args={[0.5 * scale, 32, 32]} />
             <meshStandardMaterial color="#3366FF" emissive="#3366FF" emissiveIntensity={0.5} />
         </mesh>
     );
 }
 
 // 2. The Spawner Logic
-export default function TargetManager() {
+export default function TargetManager({ targetScale = 1 }: { targetScale?: number }) {
     const { camera } = useThree();
 
     // How far away the "wall" of targets is from the player
@@ -74,6 +75,7 @@ export default function TargetManager() {
                     id={target.id}
                     position={target.pos}
                     onHit={handleTargetHit}
+                    scale={targetScale}
                 />
             ))}
         </group>
