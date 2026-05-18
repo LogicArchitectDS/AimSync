@@ -13,14 +13,14 @@ export default function RegisterPage() {
     const [error, setError] = useState("");
     const router = useRouter();
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (password !== confirmPassword) {
             setError("Passwords do not match");
             return;
         }
 
-        const res = register({
+        const res = await register({
             email,
             passwordHash: password, // Simplified for demo
             authType: "email"

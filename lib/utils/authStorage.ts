@@ -2,6 +2,7 @@
 import { StorageEngine } from "./storage";
 
 export interface UserProfile {
+    id: string;
     email: string;
     username?: string;
     profilePhoto?: string; // Base64
@@ -23,14 +24,14 @@ export const AuthStorage = {
         return data ? JSON.parse(data) : [];
     },
 
-    register: (user: UserProfile): { success: boolean; error?: string } => {
+    register: (user: UserProfile): { success: boolean; user?: UserProfile; error?: string } => {
         const accounts = AuthStorage.getAccounts();
         if (accounts.some(a => a.email === user.email)) {
             return { success: false, error: "Email already registered" };
         }
         accounts.push(user);
         localStorage.setItem(AUTH_KEYS.ACCOUNTS, JSON.stringify(accounts));
-        return { success: true };
+        return { success: true, user };
     },
 
     login: (email: string, passwordHash?: string): { success: boolean; user?: UserProfile; error?: string } => {

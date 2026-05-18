@@ -12,3 +12,16 @@ CREATE TABLE training_sessions (
     is_flagged BOOLEAN DEFAULT 0, -- The Anti-Cheat column is now built-in
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- schema.sql
+DROP TABLE IF EXISTS player_stats;
+
+CREATE TABLE player_stats (
+    user_id TEXT PRIMARY KEY,
+    global_accuracy REAL DEFAULT 0,
+    total_games INTEGER DEFAULT 0,
+    time_played INTEGER DEFAULT 0,
+    modes_data TEXT DEFAULT '{}',
+    playlists TEXT DEFAULT '[]',
+    last_played_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

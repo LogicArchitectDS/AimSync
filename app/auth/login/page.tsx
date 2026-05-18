@@ -12,9 +12,9 @@ export default function LoginPage() {
     const [error, setError] = useState("");
     const router = useRouter();
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const res = login(email, password); // Note: Simplified hashing for local demo
+        const res = await login(email, password); // Note: Simplified hashing for local demo
         if (res.success) {
             router.push("/dashboard");
         } else {
@@ -22,19 +22,19 @@ export default function LoginPage() {
         }
     };
 
-    const handleGoogleLogin = () => {
+    const handleGoogleLogin = async () => {
         // Mock Google Login
         const mockGoogleUser = {
             email: "google_user@gmail.com",
             authType: "google" as const,
             profilePhoto: "https://lh3.googleusercontent.com/a/ACg8ocL...", // Dummy URL to trigger prompt later
         };
-        const res = login(mockGoogleUser.email);
+        let res = await login(mockGoogleUser.email);
         if (res.success) {
             router.push("/dashboard");
         } else {
             // If doesn't exist, register it first
-            login(mockGoogleUser.email); // Re-try login or handle registration logic
+            res = await login(mockGoogleUser.email); // Re-try login or handle registration logic
             router.push("/dashboard");
         }
     };
