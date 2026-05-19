@@ -42,6 +42,7 @@ export function buildGameResult(rawData: any): GameResult {
         bestReactionTime: bestReactionTime,
         durationSeconds: rawData.duration || 30,
         createdAt: new Date().toISOString(), // Standardized timestamp for charts
-        extraStats: rawData.extraStats || {}
+        extraStats: rawData.extraStats || {},
+        taskId: rawData.taskId
     };
 }

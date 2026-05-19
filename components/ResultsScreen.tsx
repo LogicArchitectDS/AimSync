@@ -102,19 +102,48 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
                     // STEP 4: Calculate the precise XP split for the 6 Factors
                     const xpPayout = calculateXpDistribution(currentMode, sessionXp);
 
-                    const response = await fetch('/api/save-session', {
+                    const payload = {
+                        userId: 'guest_user_123', // Hardcoded until Auth.js is implemented
+                        protocol: currentMode,
+                        score: displayScore,
+                        shotsFired: shotsFired,
+                        accuracy: accuracy,
+                        kps: parseFloat(avgKps),
+                        durationSeconds: durationSeconds, // Added for anti-cheat verification
+                        ...xpPayout // Injects the 6 precise XP variables directly into the payload!
+                    };
+
+                    let response = await fetch('/api/save-session', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            userId: 'guest_user_123', // Hardcoded until Auth.js is implemented
-                            protocol: currentMode,
-                            score: displayScore,
-                            shotsFired: shotsFired,
-                            accuracy: accuracy,
-                            kps: parseFloat(avgKps),
-                            ...xpPayout // Injects the 6 precise XP variables directly into the payload!
-                        })
+                        body: JSON.stringify(payload)
                     });
+
+                    // Retry-with-Refresh Logic for Token Expiration Edge Case
+                    if (response.status === 401) {
+                        try {
+                            // Attempt silent re-auth (e.g., Auth.js session refresh)
+                            const refreshRes = await fetch('/api/auth/session');
+                            if (refreshRes.ok) {
+                                // Retry the submission
+                                response = await fetch('/api/save-session', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(payload)
+                                });
+                            }
+                        } catch (refreshErr) {
+                            console.warn("Silent re-auth failed:", refreshErr);
+                        }
+                    }
+
+                    if (response.status === 401) {
+                        setSaveStatus("error");
+                        if (confirm("Your session expired. Would you like to log in again to save your score?")) {
+                            router.push("/auth/login?redirect=/dashboard");
+                        }
+                        return;
+                    }
 
                     if (!response.ok) throw new Error("Failed to reach Edge API");
                     setSaveStatus("saved");

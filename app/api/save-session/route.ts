@@ -16,16 +16,25 @@ export async function POST(request: Request) {
 
         const body = await request.json();
         // We ignore the userId from the frontend completely now
-        const { protocol, score, shotsFired, accuracy, kps } = body;
+        const { protocol, score, shotsFired, accuracy, kps, durationSeconds } = body;
 
         const db = process.env.DB as any;
         if (!db) throw new Error("D1 Database binding not found.");
 
+        // TIME-SYNC ANTI-CHEAT: Sanity check the payload
+        // If a user pauses the clock on the client to get infinite time, and spoofs a massive durationSeconds
+        // to lower their KPS artificially and bypass filters, flag the score as Low Integrity.
+        let isFlagged = 0;
+        if (shotsFired > 500 && durationSeconds > 300) {
+            isFlagged = 1;
+            console.warn(`[Anti-Cheat] Flagged score from ${actualUserId}: ${shotsFired} shots in ${durationSeconds}s`);
+        }
+
         // Insert using the real user ID
         const stmt = db.prepare(`
-      INSERT INTO training_sessions (user_id, protocol, score, shots_fired, accuracy, kps)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(actualUserId, protocol, score, shotsFired, accuracy, kps);
+      INSERT INTO training_sessions (user_id, protocol, score, shots_fired, accuracy, kps, is_flagged)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(actualUserId, protocol, score, shotsFired, accuracy, kps, isFlagged);
 
         const result = await stmt.run();
 

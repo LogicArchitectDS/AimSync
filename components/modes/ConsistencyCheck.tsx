@@ -34,6 +34,7 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
     const canvasRef          = useRef<HTMLCanvasElement | null>(null);
     const animationFrameRef  = useRef<number | null>(null);
     const timeoutRef         = useRef<number | null>(null);
+    const isMountedRef       = useRef(true);
     const sessionIdxRef      = useRef(0);
     const sessionStartRef    = useRef<number>(0);
     const targetRef          = useRef<TrueTrackingTarget | null>(null);
@@ -86,6 +87,7 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
         let lastTime = performance.now();
 
         const tick = (currentTime: number) => {
+            if (!isMountedRef.current) return;
             const deltaTime = currentTime - lastTime;
             lastTime = currentTime;
 
@@ -170,7 +172,7 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
         startTrackingLoop();
 
         timeoutRef.current = window.setTimeout(() => {
-            if (sessionIdxRef.current !== currentSession) return;
+            if (!isMountedRef.current || sessionIdxRef.current !== currentSession) return;
             setMisses(p => p + 1);
             setMissedByTimeout(p => p + 1);
             setScore(p => Math.max(0, p - config.missPenalty));
@@ -295,7 +297,9 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
             spawnTarget();
             return;
         }
-        const t = window.setTimeout(() => setCountdown(c => (c !== null ? c - 1 : null)), 1000);
+        const t = window.setTimeout(() => {
+            if (isMountedRef.current) setCountdown(c => (c !== null ? c - 1 : null));
+        }, 1000);
         return () => window.clearTimeout(t);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [countdown]);
@@ -318,7 +322,9 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
 
     useEffect(() => {
         if (!gameStarted || countdown !== null) return;
-        const t = window.setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
+        const t = window.setInterval(() => {
+            if (isMountedRef.current) setTimeLeft(p => Math.max(0, p - 1));
+        }, 1000);
         return () => window.clearInterval(t);
     }, [gameStarted, countdown]);
 
@@ -327,7 +333,14 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [timeLeft, gameStarted, isFinished, countdown]);
 
-    useEffect(() => () => { clearAnimation(); clearTargetTimeout(); }, []);
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => { 
+            isMountedRef.current = false;
+            clearAnimation(); 
+            clearTargetTimeout(); 
+        }; 
+    }, []);
 
     const updateMousePosition = (event: React.MouseEvent<HTMLCanvasElement>) => {
         if (!canvasRef.current) return;

@@ -1,6 +1,6 @@
 'use client';
 
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { PointerLockControls } from '@react-three/drei';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
@@ -24,34 +24,13 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
     const { recordShot, recordHit, recordMiss } = useGameStore();
 
     const raycaster = useRef(new THREE.Raycaster());
+    const pendingShot = useRef(false);
 
     useEffect(() => {
         const handleMouseDown = (e: MouseEvent) => {
             if (e.button === 0) {
                 startFiring();
-                recordShot();
-
-                // Raycast logic
-                raycaster.current.setFromCamera(new THREE.Vector2(0, 0), camera);
-                const intersects = raycaster.current.intersectObjects(scene.children, true);
-
-                if (intersects.length > 0) {
-                    const hitObject = intersects[0].object;
-                    if (hitObject.name === 'target') {
-                        // The Death Lock: Prevents ghost-spawns
-                        if (!hitObject.userData.isDead) {
-                            hitObject.userData.isDead = true;
-                            recordHit(10);
-                            if (hitObject.userData.onHit) {
-                                hitObject.userData.onHit(hitObject.userData.id);
-                            }
-                        }
-                    } else if (hitObject.name !== 'tracking-target') {
-                        recordMiss();
-                    }
-                } else {
-                    recordMiss();
-                }
+                pendingShot.current = true; // Queue the shot for the next 3D frame
             }
         };
 
@@ -65,7 +44,38 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
             document.removeEventListener('mousedown', handleMouseDown);
             document.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [camera, scene, startFiring, stopFiring, recordShot, recordHit, recordMiss]);
+    }, [startFiring, stopFiring]);
+
+    // Offload all aiming/shooting calculations to the 60+ FPS useFrame loop
+    // This completely decouples 3D physics from the React main thread / DOM event loop
+    useFrame(() => {
+        if (pendingShot.current) {
+            pendingShot.current = false; // Consume the shot
+            recordShot();
+
+            // Raycast logic
+            raycaster.current.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.current.intersectObjects(scene.children, true);
+
+            if (intersects.length > 0) {
+                const hitObject = intersects[0].object;
+                if (hitObject.name === 'target') {
+                    // The Death Lock: Prevents ghost-spawns
+                    if (!hitObject.userData.isDead) {
+                        hitObject.userData.isDead = true;
+                        recordHit(10);
+                        if (hitObject.userData.onHit) {
+                            hitObject.userData.onHit(hitObject.userData.id);
+                        }
+                    }
+                } else if (hitObject.name !== 'tracking-target') {
+                    recordMiss();
+                }
+            } else {
+                recordMiss();
+            }
+        }
+    });
 
     return (
         <>

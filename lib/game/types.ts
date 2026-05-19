@@ -35,6 +35,7 @@ export interface GameResult {
     createdAt: string; // ISO 8601 Timestamp for graph plotting
     extraStats?: Record<string, string | number>; // Flexible field for mode-specific data
     isBenchmark?: boolean; // true = official, unmodified benchmark run
+    taskId?: string; // Optional: Links back to Dashboard Operation task ID
 }
 
 // 2. The Aggregated Profile (For the Dashboard)
@@ -57,6 +58,14 @@ export interface UserStats {
     completedTasks?: string[];
     xp?: number;
     level?: number;
+    xpFactors?: {
+        flickingXp: number;
+        trackingXp: number;
+        speedXp: number;
+        precisionXp: number;
+        perceptionXp: number;
+        cognitionXp: number;
+    };
 }
 // 3. The Custom Training System
 export interface RoutineStep {

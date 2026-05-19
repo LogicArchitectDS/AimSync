@@ -145,5 +145,12 @@ export const updateStatsWithResult = (result: GameResult): StoredStats => {
     };
 
     saveStoredStats(updated);
+    
+    // FORWARD TO DASHBOARD STORAGE (aimsync_stats)
+    // We dynamically import to avoid circular dependency issues
+    import('./storage').then(({ StorageEngine }) => {
+        StorageEngine.saveGameResult(result);
+    }).catch(err => console.error("Failed to forward telemetry to dashboard", err));
+
     return updated;
 };

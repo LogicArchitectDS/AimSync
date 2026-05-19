@@ -62,6 +62,14 @@ export const StorageEngine = {
     saveGameResult: (result: GameResult) => {
         const stats = StorageEngine.getUserStats();
 
+        // Ensure xpFactors object exists
+        if (!stats.xpFactors) {
+            stats.xpFactors = {
+                flickingXp: 0, trackingXp: 0, speedXp: 0,
+                precisionXp: 0, perceptionXp: 0, cognitionXp: 0
+            };
+        }
+
         // Update global counters
         stats.totalGamesPlayed = (stats.totalGamesPlayed || 0) + 1;
         stats.timePlayedSeconds = (stats.timePlayedSeconds || 0) + result.durationSeconds;
@@ -112,6 +120,55 @@ export const StorageEngine = {
 
         stats.globalAccuracy = totalTrackedPlays > 0 ? (globalAcc / totalTrackedPlays) : 0;
         stats.lastPlayedAt = new Date().toISOString();
+
+        // Calculate XP
+        const sessionXp = result.score * 10;
+        stats.xp = (stats.xp || 0) + sessionXp;
+
+        // Level up formula (100 * level^2)
+        let currentLevel = stats.level || 1;
+        while (stats.xp >= Math.pow(currentLevel, 2) * 100) {
+            currentLevel++;
+        }
+        stats.level = currentLevel;
+
+        // Distribute XP into factors
+        const primaryXp = Math.floor(sessionXp * 0.70);
+        const secondaryXp = Math.floor(sessionXp * 0.30);
+        
+        switch (result.modeId) {
+            case 'static-flick':
+                stats.xpFactors.precisionXp += primaryXp;
+                stats.xpFactors.flickingXp += secondaryXp;
+                break;
+            case 'tracking-mode':
+            case 'continuous-track':
+                stats.xpFactors.trackingXp += primaryXp;
+                stats.xpFactors.perceptionXp += secondaryXp;
+                break;
+            case 'reaction-test':
+                stats.xpFactors.speedXp += primaryXp;
+                stats.xpFactors.perceptionXp += secondaryXp;
+                break;
+            case 'target-switch':
+                stats.xpFactors.cognitionXp += primaryXp;
+                stats.xpFactors.flickingXp += secondaryXp;
+                break;
+            case 'micro-precision':
+                stats.xpFactors.precisionXp += primaryXp;
+                stats.xpFactors.flickingXp += secondaryXp;
+                break;
+            default:
+                stats.xpFactors.precisionXp += sessionXp;
+        }
+
+        // Handle Task Completion Tracking
+        if (result.taskId) {
+            if (!stats.completedTasks) stats.completedTasks = [];
+            if (!stats.completedTasks.includes(result.taskId)) {
+                stats.completedTasks.push(result.taskId);
+            }
+        }
 
         // Save (Triggers local + cloud sync simultaneously)
         StorageEngine.saveUserStats(stats);

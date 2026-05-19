@@ -44,7 +44,7 @@ export default function DashboardPage() {
     const { user, isTrial, logout } = useAuth();
     const router = useRouter();
 
-    const mockDbStats = { flickingXp: 8100, trackingXp: 2500, speedXp: 400, precisionXp: 14400, perceptionXp: 100, cognitionXp: 900 };
+    const radarData = stats?.xpFactors || { flickingXp: 0, trackingXp: 0, speedXp: 0, precisionXp: 0, perceptionXp: 0, cognitionXp: 0 };
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -184,6 +184,19 @@ export default function DashboardPage() {
         );
     }, [stats]);
 
+    // XP Factor bar helper (normalise to 0–100 relative to the highest factor)
+    const xpFactorBars = (() => {
+        const f = radarData;
+        const max = Math.max(f.flickingXp, f.trackingXp, f.speedXp, f.precisionXp, f.perceptionXp, f.cognitionXp, 1);
+        return [
+            { label: 'Flicking',   value: f.flickingXp,   color: 'bg-blue-500',    pct: (f.flickingXp   / max) * 100 },
+            { label: 'Tracking',   value: f.trackingXp,   color: 'bg-orange-400',  pct: (f.trackingXp   / max) * 100 },
+            { label: 'Speed',      value: f.speedXp,      color: 'bg-yellow-400',  pct: (f.speedXp      / max) * 100 },
+            { label: 'Precision',  value: f.precisionXp,  color: 'bg-emerald-400', pct: (f.precisionXp  / max) * 100 },
+            { label: 'Perception', value: f.perceptionXp, color: 'bg-cyan-400',    pct: (f.perceptionXp / max) * 100 },
+            { label: 'Cognition',  value: f.cognitionXp,  color: 'bg-purple-400',  pct: (f.cognitionXp  / max) * 100 },
+        ];
+    })();
 
     if (isLoading) return <div className="flex-1 flex items-center justify-center min-h-[50vh]"><div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>;
 
@@ -309,13 +322,28 @@ export default function DashboardPage() {
                         </div>
 
                         <div className="w-full h-px bg-white/5 mb-4" />
-                        <button onClick={logout} className="w-full py-2 mb-6 border border-white/5 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-white hover:bg-red-500 transition-all">Sign Out Terminal</button>
+                        {/* XP Factor Breakdown */}
+                        <div className="w-full mb-4 space-y-2">
+                            {xpFactorBars.map(bar => (
+                                <div key={bar.label}>
+                                    <div className="flex justify-between mb-0.5">
+                                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{bar.label}</span>
+                                        <span className="text-[9px] font-mono text-slate-400">{bar.value.toLocaleString()} XP</span>
+                                    </div>
+                                    <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                        <div className={`h-full ${bar.color} rounded-full transition-all duration-1000`} style={{ width: `${bar.pct}%` }} />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="w-full h-px bg-white/5 mb-4" />
+                        <button onClick={logout} className="w-full py-2 mb-4 border border-white/5 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-white hover:bg-red-500 transition-all">Sign Out Terminal</button>
                         <div className="w-full grid grid-cols-2 gap-4 text-left">
                             <div><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Total Plays</p><p className="text-xl font-mono text-white">{stats.totalGamesPlayed}</p></div>
                             <div><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Play Time</p><p className="text-xl font-mono text-white">{formatTime(stats.timePlayedSeconds || 0)}</p></div>
                         </div>
                     </div>
-                    <div className="flex items-center justify-center"><RadarProfiler stats={mockDbStats} /></div>
+                    <div className="flex items-center justify-center"><RadarProfiler stats={radarData} /></div>
                 </div>
 
                 {/* RIGHT PANEL */}
@@ -433,22 +461,37 @@ export default function DashboardPage() {
                         ) : (
                             <div className="flex flex-col gap-2">
                                 {playlists.map((playlist) => (
-                                    <div key={playlist.id} className="group flex justify-between items-center bg-[#121212]/50 border border-white/5 rounded-lg p-4 hover:border-blue-500/30 transition-all cursor-pointer">
-                                        <div>
+                                    <div key={playlist.id} className="group flex justify-between items-center bg-[#121212]/50 border border-white/5 rounded-lg p-4 hover:border-blue-500/30 transition-all">
+                                        <div className="flex-1 min-w-0">
                                             <h4 className="text-white font-bold text-sm tracking-wide group-hover:text-blue-400 transition-colors">{playlist.name}</h4>
                                             <p className="text-slate-500 text-[11px] mt-1">{playlist.description}</p>
-                                            <div className="mt-2 text-[9px] font-mono text-slate-400">
-                                                {playlist.tasks.length} Exercises Locked In
+                                            <div className="mt-2 flex gap-2 flex-wrap">
+                                                {playlist.tasks.slice(0, 4).map((t, i) => (
+                                                    <span key={i} className="text-[8px] font-mono text-slate-400 bg-white/5 border border-white/10 px-1.5 py-0.5 rounded">{t.mode.replace('-', ' ')}</span>
+                                                ))}
+                                                {playlist.tasks.length > 4 && <span className="text-[8px] font-mono text-slate-600">+{playlist.tasks.length - 4} more</span>}
                                             </div>
                                         </div>
-                                        <button
-                                            // TODO: To play sequentially, we need an Engine Playlist Controller!
-                                            // For now, it just boots the very first task in the array.
-                                            onClick={() => router.push(`/game?playlist=${playlist.id}`)}
-                                            className="px-6 py-2 bg-white/5 hover:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded border border-white/10 hover:border-blue-500 transition-all opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0"
-                                        >
-                                            Deploy Sequence
-                                        </button>
+                                        <div className="flex gap-2 items-center ml-4 opacity-0 group-hover:opacity-100 transition-all translate-x-4 group-hover:translate-x-0">
+                                            <button
+                                                onClick={() => {
+                                                    const updated = playlists.filter(p => p.id !== playlist.id);
+                                                    setPlaylists(updated);
+                                                    const s = { ...StorageEngine.getUserStats(), playlists: updated };
+                                                    StorageEngine.saveUserStats(s as any);
+                                                }}
+                                                className="p-2 text-slate-500 hover:text-red-500 hover:bg-red-500/10 rounded border border-white/5 transition-all"
+                                                title="Delete Routine"
+                                            >
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                            </button>
+                                            <button
+                                                onClick={() => router.push(`/game?playlist=${playlist.id}`)}
+                                                className="px-5 py-2 bg-white/5 hover:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded border border-white/10 hover:border-blue-500 transition-all"
+                                            >
+                                                Deploy
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -479,10 +522,38 @@ export default function DashboardPage() {
 
                     {/* STAT GRID */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md"><span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Global Accuracy</span><div className="flex items-baseline gap-2"><span className="text-3xl font-mono font-black text-white">{stats?.globalAccuracy.toFixed(1) || '0.0'}</span><span className="text-red-500 font-bold">%</span></div></div>
-                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md"><span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Total Time</span><div className="flex items-baseline gap-2"><span className="text-xl font-mono font-black text-white">{formatTime(stats?.timePlayedSeconds || 0)}</span></div></div>
-                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md"><span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Best Reaction Time</span><div className="flex items-baseline gap-2"><span className="text-3xl font-mono font-black text-white">{stats && Object.keys(stats.modes).length > 0 ? Math.round(Object.values(stats.modes).reduce((min, m) => m.bestReactionTime < min ? m.bestReactionTime : min, 9999)) : "-"}</span><span className="text-cyan-400 font-bold text-sm">ms</span></div></div>
-                        <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md"><span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-1">Last Deployment</span><div className="flex items-baseline gap-2"><span className="text-lg font-bold text-white truncate">{stats?.lastPlayedAt ? new Date(stats.lastPlayedAt).toLocaleDateString() : "Never"}</span></div></div>
+                        <div className="group bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md hover:border-red-500/30 hover:shadow-[0_0_20px_rgba(239,68,68,0.08)] transition-all">
+                            <span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-2">Global Accuracy</span>
+                            <div className="flex items-baseline gap-1 mb-2">
+                                <span className="text-3xl font-mono font-black text-white">{stats?.globalAccuracy.toFixed(1) || '0.0'}</span>
+                                <span className="text-red-500 font-bold">%</span>
+                            </div>
+                            <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                                <div className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded-full transition-all duration-1000" style={{ width: `${stats?.globalAccuracy || 0}%` }} />
+                            </div>
+                        </div>
+                        <div className="group bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md hover:border-blue-500/30 hover:shadow-[0_0_20px_rgba(59,130,246,0.08)] transition-all">
+                            <span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-2">Total Time</span>
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-xl font-mono font-black text-white">{formatTime(stats?.timePlayedSeconds || 0)}</span>
+                            </div>
+                            <p className="text-[10px] text-slate-600 mt-2">{stats?.totalGamesPlayed || 0} sessions</p>
+                        </div>
+                        <div className="group bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md hover:border-cyan-500/30 hover:shadow-[0_0_20px_rgba(6,182,212,0.08)] transition-all">
+                            <span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-2">Best Reaction</span>
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-3xl font-mono font-black text-white">{stats && Object.keys(stats.modes).length > 0 ? Math.round(Object.values(stats.modes).reduce((min, m) => m.bestReactionTime < min ? m.bestReactionTime : min, 9999)) : "--"}</span>
+                                <span className="text-cyan-400 font-bold text-sm">ms</span>
+                            </div>
+                            <p className="text-[10px] text-slate-600 mt-2">Personal best</p>
+                        </div>
+                        <div className="group bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md hover:border-purple-500/30 hover:shadow-[0_0_20px_rgba(168,85,247,0.08)] transition-all">
+                            <span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-2">Rank Tier</span>
+                            <div className="flex items-baseline gap-2">
+                                <span className={`text-xl font-black ${rankInfo.color}`} style={{ textShadow: `0 0 15px ${rankInfo.glow}` }}>{rankInfo.tier}</span>
+                            </div>
+                            <p className="text-[10px] text-slate-600 mt-2">{stats?.lastPlayedAt ? new Date(stats.lastPlayedAt).toLocaleDateString() : 'Never played'}</p>
+                        </div>
                     </div>
                 </div>
             </div>
