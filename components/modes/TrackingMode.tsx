@@ -87,8 +87,8 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
             if (canvas && ctx && targetRef.current) {
                 const nextTarget = updateTrackingTargetPosition(targetRef.current, dimensionsRef.current.width, dimensionsRef.current.height);
 
-                const { isFiring, x, y } = mouseRef.current;
-                const isHit = isFiring && isPointInsideTarget(x, y, nextTarget.x, nextTarget.y, nextTarget.radius);
+                const { x, y } = mouseRef.current;
+                const isHit = isPointInsideTarget(x, y, nextTarget.x, nextTarget.y, nextTarget.radius);
 
                 let newHealth = targetRef.current.health;
                 if (isHit) {
@@ -381,14 +381,10 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
                                 ref={canvasRef}
                                 width={renderDimensions.width}
                                 height={renderDimensions.height}
-                                onMouseDown={(e) => {
-                                    if (isCountingDown) return;
-                                    mouseRef.current.isFiring = true;
-                                    updateMousePosition(e);
-                                }}
-                                onMouseUp={() => { mouseRef.current.isFiring = false; }}
+                                onMouseDown={updateMousePosition}
+                                onMouseUp={updateMousePosition}
                                 onMouseMove={updateMousePosition}
-                                onMouseLeave={() => { mouseRef.current.isFiring = false; }}
+                                onMouseLeave={updateMousePosition}
                                 className="absolute inset-0 block cursor-crosshair"
                             />
                         </div>

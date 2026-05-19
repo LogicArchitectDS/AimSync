@@ -166,6 +166,9 @@ export default function ReactionTest({
                         <p className="text-gray-400 mb-8 leading-relaxed">
                             When the screen turns green, click as fast as humanly possible.
                             <br />Do not anticipate. Wait for the visual stimulus.
+                            <br /><br />
+                            <span className="text-red-400 text-xs font-bold uppercase tracking-wider block">⚠️ Photosensitivity Warning</span>
+                            <span className="text-xs text-red-400/80">This mode features sudden, full-screen color changes.</span>
                         </p>
 
                         {overrideSettings ? (
@@ -190,10 +193,10 @@ export default function ReactionTest({
             {/* 3. GAMEPLAY (The Reaction Canvas) */}
             {gameStarted && !isFinished && (
                 <div className={`relative flex flex-col items-center justify-center w-full h-full z-20 transition-colors duration-75
-                    ${gameState === "waiting" ? "bg-[#cf222e]" : ""}
-                    ${gameState === "ready" ? "bg-[#1DB954]" : ""}
-                    ${gameState === "early" ? "bg-[#cf222e]" : ""}
-                    ${gameState === "clicked" ? "bg-[#3366FF]" : ""}
+                    ${gameState === "waiting" ? "bg-[#450a0a]" : ""}
+                    ${gameState === "ready" ? "bg-[#14532d]" : ""}
+                    ${gameState === "early" ? "bg-[#450a0a]" : ""}
+                    ${gameState === "clicked" ? "bg-[#1e3a8a]" : ""}
                 `}>
 
                     {/* Visual Cues */}

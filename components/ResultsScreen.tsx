@@ -184,8 +184,8 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
                     )}
                 </div>
 
-                {/* THE 5-METRIC GRID (Now includes Max Combo and Total XP) */}
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 w-full mb-12 relative z-10">
+                {/* THE METRIC GRID (Hides Max Combo for certain modes) */}
+                <div className={`grid grid-cols-2 ${['reaction-test', 'flick-benchmark'].includes(currentMode) ? 'md:grid-cols-4' : 'md:grid-cols-5'} gap-4 w-full mb-12 relative z-10`}>
                     <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-white/5 shadow-inner">
                         <span className="text-gray-500 text-[10px] font-black tracking-wider mb-2 uppercase">Score</span>
                         <span className="text-3xl font-black text-white tabular-nums">{displayScore}</span>
@@ -201,10 +201,12 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
                         <span className="text-3xl font-black text-cyan-400 tabular-nums">{avgKps}</span>
                     </div>
 
-                    <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-white/5 shadow-inner">
-                        <span className="text-gray-500 text-[10px] font-black tracking-wider mb-2 uppercase">Max Combo</span>
-                        <span className="text-3xl font-black italic text-orange-400 tabular-nums drop-shadow-md">x{maxCombo}</span>
-                    </div>
+                    {!['reaction-test', 'flick-benchmark'].includes(currentMode) && (
+                        <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-white/5 shadow-inner">
+                            <span className="text-gray-500 text-[10px] font-black tracking-wider mb-2 uppercase">Max Combo</span>
+                            <span className="text-3xl font-black italic text-orange-400 tabular-nums drop-shadow-md">x{maxCombo}</span>
+                        </div>
+                    )}
 
                     <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-[#3366FF]/30 shadow-[0_0_15px_rgba(51,102,255,0.1)]">
                         <span className="text-[#3366FF] text-[10px] font-black tracking-wider mb-2 uppercase">Total XP</span>

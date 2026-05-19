@@ -373,6 +373,7 @@ export default function CognitiveOverdrive({ overrideSettings, onFinish }: Cogni
         setMisses((prev) => prev + 1);
         setCombo(0);
         setScore((prev) => Math.max(0, prev - config.missPenalty));
+        spawnTarget();
     };
 
     return (
