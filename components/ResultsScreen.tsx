@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useGameStore } from "@/store/gameStore";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { GameResult } from "@/lib/game/types";
+import { StorageEngine } from "@/lib/utils/storage";
 
 // --- XP PAYOUT LOGIC ---
 // Mathematically splits the session XP into Primary (70%) and Secondary (30%) Aim Factors
@@ -68,6 +69,7 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
     // The "Latch": Prevents duplicate saves during React Strict Mode double-renders
     const hasSaved = useRef(false);
     const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | "error">("saving");
+    const [levelUpInfo, setLevelUpInfo] = useState<{ from: number; to: number } | null>(null);
 
     const isLocalMode = !!result;
 
@@ -86,12 +88,28 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
     const maxCombo = isLocalMode ? (Number(result?.extraStats?.["Max Combo"]) || 0) : storeMaxCombo;
     const sessionXp = isLocalMode ? Math.round(displayScore * 10) : storeSessionXp;
 
+    // --- LEVEL-UP DETECTION for 2D local modes ---
+    // Capture the level before statsStorage saves, compare after.
     useEffect(() => {
-        // For local 2D modes, we skip the API post for now as they use their own statsStorage
-        if (isLocalMode) {
-            setSaveStatus("saved");
-            return;
+        if (!isLocalMode || !result) return;
+        const statsBeforeSave = StorageEngine.getUserStats();
+        const levelBefore = statsBeforeSave.level || 1;
+
+        // Stats are already saved by the mode before ResultsScreen mounts;
+        // we read the current (post-save) level to compare.
+        const statsAfterSave = StorageEngine.getUserStats();
+        const levelAfter = statsAfterSave.level || 1;
+
+        if (levelAfter > levelBefore) {
+            setLevelUpInfo({ from: levelBefore, to: levelAfter });
         }
+        setSaveStatus("saved");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
+        // For local 2D modes, level-up detection is handled in the effect above
+        if (isLocalMode) return;
 
         if (status === 'finished' && !hasSaved.current) {
             hasSaved.current = true;
@@ -237,11 +255,31 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
                         </div>
                     )}
 
-                    <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-[#3366FF]/30 shadow-[0_0_15px_rgba(51,102,255,0.1)]">
+                    <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-[#3366FF]/30 shadow-[0_0_15px_rgba(51,102,255,0.1)] relative overflow-hidden">
                         <span className="text-[#3366FF] text-[10px] font-black tracking-wider mb-2 uppercase">Total XP</span>
                         <span className="text-3xl font-black text-[#3366FF] tabular-nums">+{sessionXp.toLocaleString()}</span>
                     </div>
                 </div>
+
+                {/* LEVEL-UP BANNER */}
+                {levelUpInfo && (
+                    <div className="w-full mb-8 relative z-10">
+                        <div className="relative flex items-center justify-center gap-4 py-4 px-6 rounded-2xl border border-yellow-400/40 bg-yellow-400/5 overflow-hidden">
+                            {/* Animated shimmer */}
+                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-yellow-400/10 to-transparent animate-[shimmer_2s_infinite] pointer-events-none" />
+                            <span className="text-2xl">⚡</span>
+                            <div className="text-center">
+                                <p className="text-yellow-400 text-xs font-black tracking-[0.4em] uppercase">Level Up!</p>
+                                <div className="flex items-center gap-3 mt-1">
+                                    <span className="text-white/40 text-lg font-black line-through">{levelUpInfo.from}</span>
+                                    <span className="text-yellow-400 text-sm">→</span>
+                                    <span className="text-yellow-300 text-3xl font-black" style={{ textShadow: '0 0 20px rgba(250,204,21,0.8)' }}>{levelUpInfo.to}</span>
+                                </div>
+                            </div>
+                            <span className="text-2xl">⚡</span>
+                        </div>
+                    </div>
+                )}
 
                 <div className="flex flex-col sm:flex-row gap-4 w-full justify-center relative z-10">
                     <button
