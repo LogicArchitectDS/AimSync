@@ -167,6 +167,10 @@ function ColHeaders() {
     );
 }
 
+// Modes that should never appear as daily/weekly tasks (diagnostic/utility tools)
+const TASK_POOL_BLACKLIST = new Set(["sensitivity-finder", "custom-routine"]);
+const TASK_POOL = protocolCards.filter(c => !TASK_POOL_BLACKLIST.has(c.id));
+
 // ── Main page ───────────────────────────────────────────────────────────────
 export default function TasksPage() {
     const [stats, setStats] = useState<UserStats | null>(null);
@@ -178,7 +182,7 @@ export default function TasksPage() {
 
     // Seeded shuffle so tasks rotate daily / weekly
     const dailyCards = useMemo(() => {
-        const shuffled = seededShuffle(protocolCards, getDaySeed());
+        const shuffled = seededShuffle(TASK_POOL, getDaySeed());
         return shuffled.slice(0, 4).map((card, i) => ({
             mode:        card.id,
             name:        card.title,
@@ -192,7 +196,7 @@ export default function TasksPage() {
     }, [stats]);
 
     const weeklyCards = useMemo(() => {
-        const shuffled = seededShuffle(protocolCards, getWeekSeed());
+        const shuffled = seededShuffle(TASK_POOL, getWeekSeed());
         // Pick 3 that aren't in today's dailies to avoid overlap
         const dailyIds = new Set(dailyCards.map(c => c.mode));
         const candidates = shuffled.filter(c => !dailyIds.has(c.id));
