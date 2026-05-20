@@ -200,28 +200,21 @@ export default function DashboardPage() {
 
     if (isLoading) return <div className="flex-1 flex items-center justify-center min-h-[50vh]"><div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>;
 
-    if (!stats || stats.totalGamesPlayed === 0) {
-        return (
-            <div className="flex flex-col items-center justify-center space-y-6 max-w-xl mx-auto border border-white/10 bg-surface/60 backdrop-blur-md p-12 rounded-2xl shadow-2xl my-auto w-full">
-                <div className="w-20 h-20 bg-black/50 rounded-full flex items-center justify-center mx-auto mb-6 border border-white/5 shadow-[inset_0_0_20px_rgba(59,130,246,0.2)]">
-                    <svg className="w-10 h-10 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                </div>
-                <h2 className="text-3xl font-black tracking-widest uppercase text-white">Initialization Required</h2>
-                <p className="text-slate-400 text-sm leading-relaxed text-center">Your performance matrix is currently empty. To calibrate your baseline and unlock advanced analytics, deploy into a training protocol.</p>
-                <button onClick={() => router.push('/game?mode=static-flick')} className="mt-6 px-8 py-4 bg-blue-600 text-white font-black text-xs tracking-[0.2em] uppercase rounded-md hover:bg-blue-500 transition-colors shadow-[0_0_20px_rgba(59,130,246,0.3)]">Deploy Baseline Protocol</button>
-            </div>
-        );
-    }
+    // Safe defaults so new users see zeros instead of a gate screen
+    const safeStats = stats ?? {
+        totalGamesPlayed: 0, timePlayedSeconds: 0, globalAccuracy: 0,
+        modes: {}, level: 1, xp: 0, lastPlayedAt: null,
+    } as any;
 
-    const rankInfo = getRankInfo(stats);
+    const rankInfo = getRankInfo(safeStats);
 
-    const currentLevel = stats.level || 1;
-    const currentXp = stats.xp || 0;
-    const prevLevelXp = Math.pow(currentLevel - 1, 2) * 100;
-    const nextLevelXp = Math.pow(currentLevel, 2) * 100;
-    const xpProgress = currentXp - prevLevelXp;
-    const xpRequired = nextLevelXp - prevLevelXp;
-    const xpPercentage = Math.min(100, Math.max(0, (xpProgress / xpRequired) * 100));
+    const currentLevel  = safeStats.level || 1;
+    const currentXp     = safeStats.xp    || 0;
+    const prevLevelXp   = Math.pow(currentLevel - 1, 2) * 500;
+    const nextLevelXp   = Math.pow(currentLevel,     2) * 500;
+    const xpProgress    = currentXp - prevLevelXp;
+    const xpRequired    = nextLevelXp - prevLevelXp;
+    const xpPercentage  = Math.min(100, Math.max(0, (xpProgress / Math.max(xpRequired, 1)) * 100));
 
     return (
         <div className="flex flex-col gap-8 w-full relative">
@@ -339,8 +332,8 @@ export default function DashboardPage() {
                         <div className="w-full h-px bg-white/5 mb-4" />
                         <button onClick={logout} className="w-full py-2 mb-4 border border-white/5 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-white hover:bg-red-500 transition-all">Sign Out Terminal</button>
                         <div className="w-full grid grid-cols-2 gap-4 text-left">
-                            <div><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Total Plays</p><p className="text-xl font-mono text-white">{stats.totalGamesPlayed}</p></div>
-                            <div><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Play Time</p><p className="text-xl font-mono text-white">{formatTime(stats.timePlayedSeconds || 0)}</p></div>
+                            <div><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Total Plays</p><p className="text-xl font-mono text-white">{safeStats.totalGamesPlayed}</p></div>
+                            <div><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Play Time</p><p className="text-xl font-mono text-white">{formatTime(safeStats.timePlayedSeconds || 0)}</p></div>
                         </div>
                     </div>
                     <div className="flex items-center justify-center"><RadarProfiler stats={radarData} /></div>
@@ -362,15 +355,15 @@ export default function DashboardPage() {
                                 <div className="h-2 w-2 bg-blue-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.8)]" />
                                 <h3 className="text-white font-black tracking-[0.2em] uppercase text-xs">Daily Contracts</h3>
                                 <span className="text-slate-500 text-[10px] font-mono ml-auto">
-                                    {activeTasks.daily.filter(t => stats?.completedTasks?.includes(t.id)).length} / {activeTasks.daily.length} Completed
+                                    {activeTasks.daily.filter(t => safeStats?.completedTasks?.includes(t.id)).length} / {activeTasks.daily.length} Completed
                                 </span>
                             </div>
                             <div className="w-full bg-white/5 h-1 mb-4 rounded-full overflow-hidden">
-                                <div className="bg-gradient-to-r from-blue-600 to-blue-400 h-full transition-all duration-1000 ease-out" style={{ width: `${(activeTasks.daily.filter(t => stats?.completedTasks?.includes(t.id)).length / activeTasks.daily.length) * 100}%` }} />
+                                <div className="bg-gradient-to-r from-blue-600 to-blue-400 h-full transition-all duration-1000 ease-out" style={{ width: `${(activeTasks.daily.filter(t => safeStats?.completedTasks?.includes(t.id)).length / activeTasks.daily.length) * 100}%` }} />
                             </div>
                             <div className="flex flex-col gap-2">
                                 {activeTasks.daily.map((task) => {
-                                    const isCompleted = stats?.completedTasks?.includes(task.id);
+                                    const isCompleted = safeStats?.completedTasks?.includes(task.id);
                                     return (
                                         <div key={task.id} className={`group relative bg-[#121212]/50 border ${isCompleted ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/5 hover:border-blue-500/50'} rounded-lg p-4 transition-colors overflow-hidden`}>
                                             <div className={`absolute inset-0 bg-gradient-to-r ${isCompleted ? 'from-emerald-500/0 via-emerald-500/0 to-emerald-500/5' : 'from-blue-500/0 via-blue-500/0 to-blue-500/5 group-hover:to-blue-500/20'} transition-all pointer-events-none`} />
@@ -403,15 +396,15 @@ export default function DashboardPage() {
                                 <div className="h-2 w-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]" />
                                 <h3 className="text-white font-black tracking-[0.2em] uppercase text-xs">Weekly Operation</h3>
                                 <span className="text-slate-500 text-[10px] font-mono ml-auto">
-                                    {activeTasks.weekly.filter(t => stats?.completedTasks?.includes(t.id)).length} / {activeTasks.weekly.length} Completed
+                                    {activeTasks.weekly.filter(t => safeStats?.completedTasks?.includes(t.id)).length} / {activeTasks.weekly.length} Completed
                                 </span>
                             </div>
                             <div className="w-full bg-white/5 h-1 mb-4 rounded-full overflow-hidden">
-                                <div className="bg-gradient-to-r from-red-600 to-red-400 h-full transition-all duration-1000 ease-out" style={{ width: `${(activeTasks.weekly.filter(t => stats?.completedTasks?.includes(t.id)).length / activeTasks.weekly.length) * 100}%` }} />
+                                <div className="bg-gradient-to-r from-red-600 to-red-400 h-full transition-all duration-1000 ease-out" style={{ width: `${(activeTasks.weekly.filter(t => safeStats?.completedTasks?.includes(t.id)).length / activeTasks.weekly.length) * 100}%` }} />
                             </div>
                             <div className="flex flex-col gap-2">
                                 {activeTasks.weekly.map((task) => {
-                                    const isCompleted = stats?.completedTasks?.includes(task.id);
+                                    const isCompleted = safeStats?.completedTasks?.includes(task.id);
                                     return (
                                         <div key={task.id} className={`group relative bg-[#121212]/50 border ${isCompleted ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/20 hover:border-red-500/50'} rounded-lg p-5 transition-colors overflow-hidden shadow-[0_0_15px_rgba(239,68,68,0.05)]`}>
                                             <div className={`absolute inset-0 bg-gradient-to-r ${isCompleted ? 'from-emerald-500/0 via-emerald-500/0 to-emerald-500/5' : 'from-red-500/0 via-red-500/0 to-red-500/5 group-hover:to-red-500/20'} transition-all pointer-events-none`} />
@@ -525,24 +518,24 @@ export default function DashboardPage() {
                         <div className="group bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md hover:border-red-500/30 hover:shadow-[0_0_20px_rgba(239,68,68,0.08)] transition-all">
                             <span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-2">Global Accuracy</span>
                             <div className="flex items-baseline gap-1 mb-2">
-                                <span className="text-3xl font-mono font-black text-white">{stats?.globalAccuracy.toFixed(1) || '0.0'}</span>
+                                <span className="text-3xl font-mono font-black text-white">{safeStats?.globalAccuracy?.toFixed(1) ?? '0.0'}</span>
                                 <span className="text-red-500 font-bold">%</span>
                             </div>
                             <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                                <div className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded-full transition-all duration-1000" style={{ width: `${stats?.globalAccuracy || 0}%` }} />
+                                <div className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded-full transition-all duration-1000" style={{ width: `${safeStats?.globalAccuracy || 0}%` }} />
                             </div>
                         </div>
                         <div className="group bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md hover:border-blue-500/30 hover:shadow-[0_0_20px_rgba(59,130,246,0.08)] transition-all">
                             <span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-2">Total Time</span>
                             <div className="flex items-baseline gap-2">
-                                <span className="text-xl font-mono font-black text-white">{formatTime(stats?.timePlayedSeconds || 0)}</span>
+                                <span className="text-xl font-mono font-black text-white">{formatTime(safeStats?.timePlayedSeconds || 0)}</span>
                             </div>
-                            <p className="text-[10px] text-slate-600 mt-2">{stats?.totalGamesPlayed || 0} sessions</p>
+                            <p className="text-[10px] text-slate-600 mt-2">{safeStats?.totalGamesPlayed || 0} sessions</p>
                         </div>
                         <div className="group bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md hover:border-cyan-500/30 hover:shadow-[0_0_20px_rgba(6,182,212,0.08)] transition-all">
                             <span className="text-slate-500 text-[10px] font-black tracking-widest uppercase block mb-2">Best Reaction</span>
                             <div className="flex items-baseline gap-2">
-                                <span className="text-3xl font-mono font-black text-white">{stats && Object.keys(stats.modes).length > 0 ? Math.round(Object.values(stats.modes).reduce((min, m) => m.bestReactionTime < min ? m.bestReactionTime : min, 9999)) : "--"}</span>
+                                <span className="text-3xl font-mono font-black text-white">{safeStats && Object.keys(safeStats.modes).length > 0 ? Math.round(Object.values(safeStats.modes as any).reduce((min: number, m: any) => m.bestReactionTime < min ? m.bestReactionTime : min, 9999) as number) : "--"}</span>
                                 <span className="text-cyan-400 font-bold text-sm">ms</span>
                             </div>
                             <p className="text-[10px] text-slate-600 mt-2">Personal best</p>
@@ -552,7 +545,7 @@ export default function DashboardPage() {
                             <div className="flex items-baseline gap-2">
                                 <span className={`text-xl font-black ${rankInfo.color}`} style={{ textShadow: `0 0 15px ${rankInfo.glow}` }}>{rankInfo.tier}</span>
                             </div>
-                            <p className="text-[10px] text-slate-600 mt-2">{stats?.lastPlayedAt ? new Date(stats.lastPlayedAt).toLocaleDateString() : 'Never played'}</p>
+                            <p className="text-[10px] text-slate-600 mt-2">{safeStats?.lastPlayedAt ? new Date(safeStats.lastPlayedAt).toLocaleDateString() : 'Never played'}</p>
                         </div>
                     </div>
                 </div>

@@ -1,8 +1,13 @@
-import { getRequestContext } from '@cloudflare/next-on-pages';
 import { NextResponse } from 'next/server';
 
 // Force Next.js to use Cloudflare's Edge network for zero-latency database calls
 export const runtime = 'edge';
+
+// Helper: get D1 binding at runtime (throws when not on Cloudflare edge)
+async function getDb(): Promise<any> {
+    const { getRequestContext } = await import('@cloudflare/next-on-pages');
+    return getRequestContext().env.DB;
+}
 
 // --- GET: Fetch player stats from Cloudflare D1 ---
 export async function GET(request: Request) {
@@ -13,10 +18,20 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'Missing userId parameter' }, { status: 400 });
     }
 
+    let db: any;
     try {
-        const db = getRequestContext().env.DB; // Connect to Cloudflare D1
-        const stmt = db.prepare('SELECT * FROM player_stats WHERE user_id = ?').bind(userId);
-        const result = await stmt.first();
+        db = await getDb();
+    } catch {
+        // Not running on Cloudflare edge (local Next.js dev server).
+        // Return a clean 503 so the dashboard can degrade gracefully without noise.
+        return NextResponse.json({ error: 'D1 unavailable in local dev' }, { status: 503 });
+    }
+
+    try {
+        const result = await db
+            .prepare('SELECT * FROM player_stats WHERE user_id = ?')
+            .bind(userId)
+            .first();
 
         if (!result) {
             return NextResponse.json({ error: 'No data found' }, { status: 404 });
@@ -31,36 +46,38 @@ export async function GET(request: Request) {
 
 // --- POST: Upsert (Save) player stats to Cloudflare D1 ---
 export async function POST(request: Request) {
+    let db: any;
     try {
-        const { userId, stats } = await request.json() as { userId: string, stats: any };
+        db = await getDb();
+    } catch {
+        return NextResponse.json({ error: 'D1 unavailable in local dev' }, { status: 503 });
+    }
+
+    try {
+        const { userId, stats } = await request.json() as { userId: string; stats: any };
 
         if (!userId || !stats) {
             return NextResponse.json({ error: 'Missing payload' }, { status: 400 });
         }
 
-        const db = getRequestContext().env.DB;
-
-        // Upsert: If the user exists, update their stats. If they are new, insert a new row.
-        const stmt = db.prepare(`
+        await db.prepare(`
             INSERT INTO player_stats (user_id, global_accuracy, total_games, time_played, modes_data, playlists)
             VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
-            global_accuracy = excluded.global_accuracy,
-            total_games = excluded.total_games,
-            time_played = excluded.time_played,
-            modes_data = excluded.modes_data,
-            playlists = excluded.playlists,
-            last_played_at = CURRENT_TIMESTAMP
+                global_accuracy = excluded.global_accuracy,
+                total_games     = excluded.total_games,
+                time_played     = excluded.time_played,
+                modes_data      = excluded.modes_data,
+                playlists       = excluded.playlists,
+                last_played_at  = CURRENT_TIMESTAMP
         `).bind(
             userId,
-            stats.globalAccuracy || 0,
-            stats.totalGamesPlayed || 0,
+            stats.globalAccuracy    || 0,
+            stats.totalGamesPlayed  || 0,
             stats.timePlayedSeconds || 0,
-            JSON.stringify(stats.modes || {}),
-            JSON.stringify(stats.playlists || [])
-        );
-
-        await stmt.run();
+            JSON.stringify(stats.modes     || {}),
+            JSON.stringify(stats.playlists || []),
+        ).run();
 
         return NextResponse.json({ success: true, message: 'Stats synced to cloud successfully' });
     } catch (error) {
