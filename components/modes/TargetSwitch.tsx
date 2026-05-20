@@ -29,6 +29,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
     const timeoutRef = useRef<number | null>(null);
     const sessionIdxRef = useRef(0);
     const sessionStartRef = useRef<number>(0);
+    const activeTargetId = useRef<string | null>(null);
 
     const dimensionsRef = useRef({ width: 1600, height: 900 });
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
@@ -77,6 +78,10 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
         const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, effectiveDuration);
         
         const wave = createTargetSwitchWave(effectiveDifficulty, dimensionsRef.current.width, dimensionsRef.current.height, radius);
+        const correctTarget = wave.find(t => t.isCorrect);
+        if (correctTarget) {
+            activeTargetId.current = correctTarget.id;
+        }
         setTargets(wave);
         setTotalTargetsSpawned((prev) => prev + 1);
 
@@ -137,7 +142,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
             extraStats: { "Timeout Misses": missedByTimeout },
         });
 
-        updateStatsWithResult(resultData);
+        await updateStatsWithResult(resultData);
 
         if (document.fullscreenElement) {
             await document.exitFullscreen().catch(() => { });
@@ -253,6 +258,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
 
         if (hitTarget) {
             if (hitTarget.isCorrect) {
+                if (hitTarget.id !== activeTargetId.current) return;
                 const reaction = performance.now() - hitTarget.spawnedAt;
                 const nextCombo = combo + 1;
                 setHits((prev) => prev + 1);

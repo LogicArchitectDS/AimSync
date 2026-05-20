@@ -540,7 +540,7 @@ export default function Echolocation({ overrideSettings, onFinish }: Echolocatio
             await document.exitFullscreen().catch(() => {});
         }
 
-        window.setTimeout(() => {
+        window.setTimeout(async () => {
             const resultData = buildGameResult({
                 mode: "echolocation",
                 difficulty: difficultyLabels[difficulty],
@@ -550,7 +550,7 @@ export default function Echolocation({ overrideSettings, onFinish }: Echolocatio
                 duration: effectiveDuration,
                 reactionTimes,
             });
-            updateStatsWithResult(resultData);
+            await updateStatsWithResult(resultData);
             setResult(resultData);
             setIsFinished(true);
         }, 800);

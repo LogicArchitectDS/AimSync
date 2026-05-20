@@ -5,41 +5,42 @@ import { useGameStore } from "@/store/gameStore";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { GameResult } from "@/lib/game/types";
 import { StorageEngine } from "@/lib/utils/storage";
+import { getModeConfig } from "@/lib/game/modeRegistry";
+import { getLevelProgress } from "@/lib/utils/statsService";
 
 // --- XP PAYOUT LOGIC ---
 // Mathematically splits the session XP into Primary (70%) and Secondary (30%) Aim Factors
 const calculateXpDistribution = (mode: string, totalXp: number) => {
-    const primaryXp = Math.floor(totalXp * 0.70);
+    const primaryXp   = Math.floor(totalXp * 0.70);
     const secondaryXp = Math.floor(totalXp * 0.30);
 
-    let distribution = {
-        xpGainedFlicking: 0,
-        xpGainedTracking: 0,
-        xpGainedSpeed: 0,
-        xpGainedPrecision: 0,
+    const distribution = {
+        xpGainedFlicking:   0,
+        xpGainedTracking:   0,
+        xpGainedSpeed:      0,
+        xpGainedPrecision:  0,
         xpGainedPerception: 0,
-        xpGainedCognition: 0,
+        xpGainedCognition:  0,
     };
 
     switch (mode) {
         case 'static-flick':
-            distribution.xpGainedPrecision = primaryXp;
-            distribution.xpGainedFlicking = secondaryXp;
+            distribution.xpGainedPrecision  = primaryXp;
+            distribution.xpGainedFlicking   = secondaryXp;
             break;
         case 'tracking-mode':
-            distribution.xpGainedTracking = primaryXp;
+            distribution.xpGainedTracking   = primaryXp;
             distribution.xpGainedPerception = secondaryXp;
             break;
         case 'reaction-test':
-            distribution.xpGainedSpeed = primaryXp;
+            distribution.xpGainedSpeed      = primaryXp;
             distribution.xpGainedPerception = secondaryXp;
             break;
         case 'target-switch':
-            distribution.xpGainedCognition = primaryXp;
-            distribution.xpGainedFlicking = secondaryXp;
+            distribution.xpGainedCognition  = primaryXp;
+            distribution.xpGainedFlicking   = secondaryXp;
             break;
         default:
-            // Fallback: Give 100% to precision if protocol is unknown
             distribution.xpGainedPrecision = totalXp;
     }
     return distribution;
@@ -53,62 +54,87 @@ interface ResultsScreenProps {
 
 export default function ResultsScreen({ result, onRestart, onBackToMenu }: ResultsScreenProps = {}) {
     // Atomic selectors for performance (legacy 3D engine support)
-    const status = useGameStore(state => state.status);
-    const storeScore = useGameStore(state => state.score);
-    const storeHighScore = useGameStore(state => state.highScore);
-    const storeShotsFired = useGameStore(state => state.shotsFired);
+    const status           = useGameStore(state => state.status);
+    const storeScore       = useGameStore(state => state.score);
+    const storeHighScore   = useGameStore(state => state.highScore);
+    const storeShotsFired  = useGameStore(state => state.shotsFired);
     const storeTotalDuration = useGameStore(state => state.totalDuration);
-    const storeSessionXp = useGameStore(state => state.sessionXp); // NEW: Arkham XP
-    const storeMaxCombo = useGameStore(state => state.maxCombo);   // NEW: Max Combo
-    const storeReset = useGameStore(state => state.reset);
-    const storeStartGame = useGameStore(state => state.startGame);
+    const storeSessionXp   = useGameStore(state => state.sessionXp);
+    const storeMaxCombo    = useGameStore(state => state.maxCombo);
+    const storeReset       = useGameStore(state => state.reset);
+    const storeStartGame   = useGameStore(state => state.startGame);
 
-    const router = useRouter();
+    const router       = useRouter();
     const searchParams = useSearchParams();
 
     // The "Latch": Prevents duplicate saves during React Strict Mode double-renders
     const hasSaved = useRef(false);
-    const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | "error">("saving");
+
+    const [saveStatus, setSaveStatus]   = useState<"saving" | "saved" | "error">("saving");
     const [levelUpInfo, setLevelUpInfo] = useState<{ from: number; to: number } | null>(null);
+
+    // XP progress bar state — animated in two phases (before → after save)
+    const [progressBefore, setProgressBefore] = useState(0);
+    const [progressAfter,  setProgressAfter]  = useState(0);
+    const [barAnimated,    setBarAnimated]     = useState(false);
 
     const isLocalMode = !!result;
 
     // Derived values
-    const currentMode = isLocalMode ? (result?.modeId || 'unknown-protocol') : (searchParams.get('mode') || 'unknown-protocol');
-    const displayScore = isLocalMode ? (result?.score || 0) : storeScore;
+    const currentMode    = isLocalMode ? (result?.modeId || 'unknown-protocol') : (searchParams.get('mode') || 'unknown-protocol');
+    const displayScore   = isLocalMode ? (result?.score || 0) : storeScore;
     const durationSeconds = isLocalMode ? (result?.durationSeconds || 1) : storeTotalDuration;
-    const shotsFired = isLocalMode ? ((result?.hits || 0) + (result?.misses || 0)) : storeShotsFired;
-    const accuracy = isLocalMode ? (result?.accuracy || 0) : (shotsFired > 0 ? Math.round((storeScore / shotsFired) * 100) : 0);
-    const avgKps = (displayScore / (durationSeconds || 1)).toFixed(2);
-    
-    // Mock high score for 2D modes right now
-    const highScore = isLocalMode ? 0 : storeHighScore;
-    const isNewBest = displayScore >= highScore && displayScore > 0;
-    
-    const maxCombo = isLocalMode ? (Number(result?.extraStats?.["Max Combo"]) || 0) : storeMaxCombo;
-    const sessionXp = isLocalMode ? Math.round(displayScore * 10) : storeSessionXp;
+    const shotsFired     = isLocalMode ? ((result?.hits || 0) + (result?.misses || 0)) : storeShotsFired;
+    const accuracy       = isLocalMode ? (result?.accuracy || 0) : (shotsFired > 0 ? Math.round((storeScore / shotsFired) * 100) : 0);
+    const avgKps         = (displayScore / (durationSeconds || 1)).toFixed(2);
 
-    // --- LEVEL-UP DETECTION for 2D local modes ---
-    // Capture the level before statsStorage saves, compare after.
+    // Mock high score for 2D modes right now
+    const highScore  = isLocalMode ? 0 : storeHighScore;
+    const isNewBest  = displayScore >= highScore && displayScore > 0;
+
+    const maxCombo   = isLocalMode ? (Number(result?.extraStats?.["Max Combo"]) || 0) : storeMaxCombo;
+    const sessionXp  = isLocalMode ? Math.round(displayScore * 10) : storeSessionXp;
+
+    // Registry lookup — drives combo column visibility
+    const modeConfig    = getModeConfig(currentMode);
+    const showComboCell = modeConfig.supportsCombo;
+
+    // ── LEVEL-UP DETECTION for 2D local modes ────────────────────────────────
     useEffect(() => {
         if (!isLocalMode || !result) return;
-        const statsBeforeSave = StorageEngine.getUserStats();
-        const levelBefore = statsBeforeSave.level || 1;
 
-        // Stats are already saved by the mode before ResultsScreen mounts;
-        // we read the current (post-save) level to compare.
-        const statsAfterSave = StorageEngine.getUserStats();
-        const levelAfter = statsAfterSave.level || 1;
+        // Snapshot XP *before* the mode component already saved (stats were
+        // saved before ResultsScreen mounted, so we work backwards via XP delta).
+        const statsNow    = StorageEngine.getUserStats();
+        const xpNow       = statsNow.xp || 0;
+        const xpBefore    = Math.max(0, xpNow - sessionXp);
+        const levelBefore = statsNow.level || 1;
 
-        if (levelAfter > levelBefore) {
-            setLevelUpInfo({ from: levelBefore, to: levelAfter });
+        const before = getLevelProgress(xpBefore);
+        const after  = getLevelProgress(xpNow);
+
+        setProgressBefore(before.percentageComplete);
+
+        // Detect level-up
+        if (after.currentLevel > levelBefore) {
+            setLevelUpInfo({ from: levelBefore, to: after.currentLevel });
         }
+
         setSaveStatus("saved");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+        // Animate the bar: start at pre-save position, animate to post-save
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                setProgressAfter(after.percentageComplete);
+                setBarAnimated(true);
+            }, 300); // short delay so the bar is visible before animating
+        });
+
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // ── EDGE TELEMETRY (3D legacy / direct store modes) ──────────────────────
     useEffect(() => {
-        // For local 2D modes, level-up detection is handled in the effect above
         if (isLocalMode) return;
 
         if (status === 'finished' && !hasSaved.current) {
@@ -117,37 +143,34 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
 
             const saveTelemetry = async () => {
                 try {
-                    // STEP 4: Calculate the precise XP split for the 6 Factors
                     const xpPayout = calculateXpDistribution(currentMode, sessionXp);
 
                     const payload = {
-                        userId: 'guest_user_123', // Hardcoded until Auth.js is implemented
-                        protocol: currentMode,
-                        score: displayScore,
-                        shotsFired: shotsFired,
-                        accuracy: accuracy,
-                        kps: parseFloat(avgKps),
-                        durationSeconds: durationSeconds, // Added for anti-cheat verification
-                        ...xpPayout // Injects the 6 precise XP variables directly into the payload!
+                        userId:          'guest_user_123',
+                        protocol:        currentMode,
+                        score:           displayScore,
+                        shotsFired:      shotsFired,
+                        accuracy:        accuracy,
+                        kps:             parseFloat(avgKps),
+                        durationSeconds: durationSeconds,
+                        ...xpPayout,
                     };
 
                     let response = await fetch('/api/save-session', {
-                        method: 'POST',
+                        method:  'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
+                        body:    JSON.stringify(payload),
                     });
 
                     // Retry-with-Refresh Logic for Token Expiration Edge Case
                     if (response.status === 401) {
                         try {
-                            // Attempt silent re-auth (e.g., Auth.js session refresh)
                             const refreshRes = await fetch('/api/auth/session');
                             if (refreshRes.ok) {
-                                // Retry the submission
                                 response = await fetch('/api/save-session', {
-                                    method: 'POST',
+                                    method:  'POST',
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify(payload)
+                                    body:    JSON.stringify(payload),
                                 });
                             }
                         } catch (refreshErr) {
@@ -184,7 +207,7 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
         } else {
             storeReset();
             if (document.fullscreenElement) {
-                await document.exitFullscreen().catch(() => { });
+                await document.exitFullscreen().catch(() => {});
             }
             router.push('/dashboard');
         }
@@ -199,8 +222,31 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
         }
     };
 
+    // Grid column count: 4 when no combo cell, 5 when combo is shown
+    const gridCols = showComboCell ? 'md:grid-cols-5' : 'md:grid-cols-4';
+
+    // Current bar width — start at pre-save progress, animate to post-save
+    const barWidth = barAnimated ? progressAfter : progressBefore;
+
     return (
         <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-xl pointer-events-auto flex items-center justify-center p-6 transition-all duration-500 ease-out animate-in fade-in zoom-in-95">
+
+            {/* ── SYNCING OVERLAY ────────────────────────────────────────────── */}
+            {saveStatus === "saving" && (
+                <div className="absolute inset-0 z-[300] flex flex-col items-center justify-center bg-black/60 backdrop-blur-lg rounded-3xl">
+                    <div className="flex flex-col items-center gap-4 px-10 py-8 rounded-2xl border border-white/10 bg-white/5 shadow-2xl">
+                        {/* Spinner */}
+                        <div className="w-10 h-10 border-4 border-[#3366FF]/30 border-t-[#3366FF] rounded-full animate-spin" />
+                        <p className="text-white text-sm font-bold tracking-[0.3em] uppercase">
+                            Syncing Telemetry to Edge...
+                        </p>
+                        <p className="text-gray-500 text-xs tracking-wider">
+                            Uploading to Cloudflare D1
+                        </p>
+                    </div>
+                </div>
+            )}
+
             <div className="w-full max-w-4xl bg-[#121212] border border-white/10 rounded-3xl p-10 shadow-2xl flex flex-col items-center text-white relative overflow-hidden">
 
                 {/* Decorative Background */}
@@ -215,11 +261,13 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
 
                 {/* Save Status Indicator */}
                 <div className="mt-4 mb-6 flex items-center justify-center space-x-2">
-                    {saveStatus === "saving" && <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>}
-                    {saveStatus === "saved" && <div className="w-2 h-2 bg-[#1DB954] rounded-full shadow-[0_0_8px_#1DB954]"></div>}
-                    {saveStatus === "error" && <div className="w-2 h-2 bg-red-500 rounded-full"></div>}
+                    {saveStatus === "saving" && <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />}
+                    {saveStatus === "saved"  && <div className="w-2 h-2 bg-[#1DB954] rounded-full shadow-[0_0_8px_#1DB954]" />}
+                    {saveStatus === "error"  && <div className="w-2 h-2 bg-red-500 rounded-full" />}
                     <span className="text-xs tracking-widest text-gray-400 uppercase">
-                        {saveStatus === "saving" ? "Syncing Telemetry to Cloud..." : saveStatus === "saved" ? "Data Secured to D1" : "Sync Failed"}
+                        {saveStatus === "saving" ? "Syncing Telemetry to Edge..."
+                            : saveStatus === "saved" ? "Data Secured to D1"
+                            : "Sync Failed"}
                     </span>
                 </div>
 
@@ -231,8 +279,8 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
                     )}
                 </div>
 
-                {/* THE METRIC GRID (Hides Max Combo for certain modes) */}
-                <div className={`grid grid-cols-2 ${['reaction-test', 'flick-benchmark'].includes(currentMode) ? 'md:grid-cols-4' : 'md:grid-cols-5'} gap-4 w-full mb-12 relative z-10`}>
+                {/* THE METRIC GRID — combo cell hidden for modes that don't support it */}
+                <div className={`grid grid-cols-2 ${gridCols} gap-4 w-full mb-8 relative z-10`}>
                     <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-white/5 shadow-inner">
                         <span className="text-gray-500 text-[10px] font-black tracking-wider mb-2 uppercase">Score</span>
                         <span className="text-3xl font-black text-white tabular-nums">{displayScore}</span>
@@ -248,7 +296,7 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
                         <span className="text-3xl font-black text-cyan-400 tabular-nums">{avgKps}</span>
                     </div>
 
-                    {!['reaction-test', 'flick-benchmark'].includes(currentMode) && (
+                    {showComboCell && (
                         <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-white/5 shadow-inner">
                             <span className="text-gray-500 text-[10px] font-black tracking-wider mb-2 uppercase">Max Combo</span>
                             <span className="text-3xl font-black italic text-orange-400 tabular-nums drop-shadow-md">x{maxCombo}</span>
@@ -260,6 +308,41 @@ export default function ResultsScreen({ result, onRestart, onBackToMenu }: Resul
                         <span className="text-3xl font-black text-[#3366FF] tabular-nums">+{sessionXp.toLocaleString()}</span>
                     </div>
                 </div>
+
+                {/* ── XP LEVEL PROGRESS BAR ────────────────────────────────────── */}
+                {isLocalMode && (
+                    <div className="w-full mb-8 relative z-10">
+                        {(() => {
+                            const stats       = StorageEngine.getUserStats();
+                            const xpNow       = stats.xp || 0;
+                            const progress    = getLevelProgress(xpNow);
+                            return (
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-gray-400 text-xs font-black tracking-widest uppercase">
+                                            Level {progress.currentLevel}
+                                        </span>
+                                        <span className="text-gray-600 text-xs font-bold tracking-wider">
+                                            {Math.round(progress.xpIntoLevel).toLocaleString()} / {Math.round(progress.xpNeededForNext).toLocaleString()} XP
+                                        </span>
+                                        <span className="text-gray-400 text-xs font-black tracking-widest uppercase">
+                                            Level {progress.nextLevel}
+                                        </span>
+                                    </div>
+                                    <div className="w-full h-2.5 bg-white/5 rounded-full overflow-hidden border border-white/10">
+                                        <div
+                                            className="h-full rounded-full bg-gradient-to-r from-[#3366FF] to-cyan-400 shadow-[0_0_8px_rgba(51,102,255,0.6)]"
+                                            style={{
+                                                width: `${barWidth}%`,
+                                                transition: 'width 0.6s ease-out',
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            );
+                        })()}
+                    </div>
+                )}
 
                 {/* LEVEL-UP BANNER */}
                 {levelUpInfo && (

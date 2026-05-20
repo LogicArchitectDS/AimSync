@@ -32,9 +32,9 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
     const sessionIdxRef = useRef(0);
     const sessionStartRef = useRef<number>(0);
     const targetRef = useRef<BaseTarget | null>(null);
+    const activeTargetId = useRef<string | null>(null);
 
     const dimensionsRef = useRef({ width: 1600, height: 900 });
-    const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
 
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
     const [durationSeconds, setDurationSeconds] = useState<number>(overrideSettings?.duration ?? 30);
@@ -126,6 +126,7 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
         );
 
         targetRef.current = nextTarget;
+        activeTargetId.current = nextTarget.id;
         setTotalTargetsSpawned((prev) => prev + 1);
 
         timeoutRef.current = window.setTimeout(() => {
@@ -184,7 +185,7 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
             extraStats: { "Micro Radius": microRadius, "Timeout Misses": missedByTimeout },
         });
 
-        updateStatsWithResult(resultData);
+        await updateStatsWithResult(resultData);
 
         if (document.fullscreenElement) {
             await document.exitFullscreen().catch(() => { });
@@ -218,7 +219,8 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
             if (canvasRef.current && canvasRef.current.parentElement) {
                 const { clientWidth, clientHeight } = canvasRef.current.parentElement;
                 dimensionsRef.current = { width: clientWidth, height: clientHeight };
-                setRenderDimensions({ width: clientWidth, height: clientHeight });
+                canvasRef.current.width = clientWidth;
+                canvasRef.current.height = clientHeight;
             }
         };
         window.addEventListener("resize", updateSize);
@@ -249,6 +251,7 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
 
     const handleCanvasMouseDown = (event: React.MouseEvent<HTMLCanvasElement, MouseEvent>) => {
         if (!gameStarted || !targetRef.current || isCountingDown) return;
+        if (targetRef.current.id !== activeTargetId.current) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
 
@@ -360,8 +363,6 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
                         <div className="relative z-10 w-full h-full">
                             <canvas
                                 ref={canvasRef}
-                                width={renderDimensions.width}
-                                height={renderDimensions.height}
                                 onMouseDown={handleCanvasMouseDown}
                                 className="absolute inset-0 block cursor-crosshair"
                             />

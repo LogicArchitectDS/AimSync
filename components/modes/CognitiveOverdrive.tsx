@@ -42,6 +42,7 @@ export default function CognitiveOverdrive({ overrideSettings, onFinish }: Cogni
     const sessionIdxRef = useRef(0);
     const sessionStartRef = useRef<number>(0);
     const lastHitTargetIdRef = useRef<string | null>(null);
+    const activeTargetId = useRef<string | null>(null);
 
     const dimensionsRef = useRef({ width: 1600, height: 900 });
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
@@ -104,6 +105,7 @@ export default function CognitiveOverdrive({ overrideSettings, onFinish }: Cogni
         const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
         const radius = getScaledRadius(config.targetRadius, difficulty, elapsedSec, durationSeconds);
         const nextTarget = createStaticTarget(dimensionsRef.current.width, dimensionsRef.current.height, radius);
+        activeTargetId.current = nextTarget.id;
         
         setTarget(nextTarget);
         
@@ -185,7 +187,7 @@ export default function CognitiveOverdrive({ overrideSettings, onFinish }: Cogni
             extraStats: { "Timeout Misses": missedByTimeout },
         });
 
-        updateStatsWithResult(resultData);
+        await updateStatsWithResult(resultData);
 
         if (document.fullscreenElement) {
             await document.exitFullscreen().catch(() => { });
@@ -327,7 +329,8 @@ export default function CognitiveOverdrive({ overrideSettings, onFinish }: Cogni
     const isCountingDown = countdown !== null && countdown > 0;
 
     const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement, MouseEvent>) => {
-        if (!gameStarted || isCountingDown) return;
+        if (!gameStarted || isCountingDown || !target) return;
+        if (target.id !== activeTargetId.current) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
 
@@ -354,7 +357,7 @@ export default function CognitiveOverdrive({ overrideSettings, onFinish }: Cogni
         }
 
         // Check Hostile Target
-        if (target && isPointInsideTarget(x, y, target.x, target.y, target.radius)) {
+        if (isPointInsideTarget(x, y, target.x, target.y, target.radius)) {
             if (target.id === lastHitTargetIdRef.current) return;
             lastHitTargetIdRef.current = target.id;
 
@@ -365,6 +368,8 @@ export default function CognitiveOverdrive({ overrideSettings, onFinish }: Cogni
             setScore((prev) => prev + config.scorePerHit + (nextCombo * 5)); 
             setReactionTimes((prev) => [...prev, reaction]);
             spawnHitmarker(event.clientX, event.clientY);
+            
+            clearTargetTimeout();
             spawnTarget();
             return;
         }
@@ -373,6 +378,8 @@ export default function CognitiveOverdrive({ overrideSettings, onFinish }: Cogni
         setMisses((prev) => prev + 1);
         setCombo(0);
         setScore((prev) => Math.max(0, prev - config.missPenalty));
+        
+        clearTargetTimeout();
         spawnTarget();
     };
 

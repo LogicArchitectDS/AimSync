@@ -23,6 +23,7 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
     const sessionIdxRef = useRef(0);
     const sessionStartRef = useRef<number>(0);
     const targetsRef = useRef<BaseTarget[]>([]);
+    const activeTargetIds = useRef<Set<string>>(new Set());
     const dimensionsRef = useRef({ width: 1600, height: 900 });
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
@@ -60,7 +61,7 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
                 ctx.clearRect(0, 0, dimensionsRef.current.width, dimensionsRef.current.height);
                 for (const t of targetsRef.current) {
                     const gradient = ctx.createRadialGradient(t.x - t.radius * 0.3, t.y - t.radius * 0.3, t.radius * 0.1, t.x, t.y, t.radius);
-                    gradient.addColorStop(0, "#FFFFFF"); gradient.addColorStop(0.3, "#F97316"); gradient.addColorStop(1, "#7C2D12");
+                    gradient.addColorStop(0, "#CBD5E1"); gradient.addColorStop(0.3, "#F97316"); gradient.addColorStop(1, "#7C2D12");
                     ctx.beginPath(); ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2); ctx.fillStyle = gradient;
                     ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 25; ctx.shadowOffsetY = 20; ctx.fill();
                     ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
@@ -79,6 +80,7 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
         
         const clusterSize = getBurstSize(difficulty) || 3;
         const newCluster: BaseTarget[] = [];
+        activeTargetIds.current.clear();
         for (let i = 0; i < clusterSize; i++) {
             let next = createBurstTarget(dimensionsRef.current.width, dimensionsRef.current.height, radius);
             let attempts = 0;
@@ -87,6 +89,7 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
                 attempts++;
             }
             newCluster.push(next);
+            activeTargetIds.current.add(next.id);
         }
         targetsRef.current = newCluster;
         setTotalTargetsSpawned((prev) => prev + clusterSize);
@@ -131,7 +134,7 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
         setGameStarted(false);
         targetsRef.current = [];
         const resultData = buildGameResult({ mode: "Burst Reaction", difficulty: difficultyLabels[effectiveDifficulty], score, hits, misses, duration: effectiveDuration, reactionTimes, totalTargetsSpawned, missedByTimeout, extraStats: { "Max Combo": combo, "Timeout Misses": missedByTimeout } });
-        updateStatsWithResult(resultData);
+        await updateStatsWithResult(resultData);
         if (document.fullscreenElement) await document.exitFullscreen().catch(() => { });
         if (onFinish) { onFinish(resultData); } else { setResult(resultData); setIsFinished(true); }
     };
@@ -176,6 +179,9 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
         for (let i = 0; i < targetsRef.current.length; i++) { if (isPointInsideTarget(x, y, targetsRef.current[i].x, targetsRef.current[i].y, targetsRef.current[i].radius)) { hitIndex = i; break; } }
         if (hitIndex !== -1) {
             const hitTarget = targetsRef.current[hitIndex];
+            if (!activeTargetIds.current.has(hitTarget.id)) return;
+            activeTargetIds.current.delete(hitTarget.id);
+            
             const reaction = performance.now() - hitTarget.spawnedAt;
             const nextCombo = combo + 1;
             targetsRef.current.splice(hitIndex, 1);

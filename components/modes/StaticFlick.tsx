@@ -30,6 +30,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
     const timeoutRef = useRef<number | null>(null);
     const sessionStartRef = useRef<number>(0);
     const lastHitTargetIdRef = useRef<string | null>(null);
+    const activeTargetId = useRef<string | null>(null);
 
     const { isTrial } = useAuth();
 
@@ -67,7 +68,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
         }
     }, []);
 
-    const endSessionCallback = useCallback(() => {
+    const endSessionCallback = useCallback(async () => {
         clearTargetTimeout();
         setTarget(null);
 
@@ -83,7 +84,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
             taskId: overrideSettings?.taskId,
         });
 
-        updateStatsWithResult(resultData);
+        await updateStatsWithResult(resultData);
         if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 
         if (onFinish) {
@@ -108,6 +109,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
         const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, engine.duration);
         const nextTarget = createStaticTarget(engine.dimensions.width, engine.dimensions.height, radius);
         nextTarget.spawnedAt = performance.now();
+        activeTargetId.current = nextTarget.id;
 
         setTarget(nextTarget);
         totalSpawnedRef.current += 1;
@@ -224,6 +226,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
 
     const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
         if (engine.phase !== "live" || !target || engine.countdown !== null) return;
+        if (target.id !== activeTargetId.current) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
 

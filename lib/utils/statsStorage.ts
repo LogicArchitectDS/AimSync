@@ -125,7 +125,7 @@ const getUpdatedModeStats = (existing: ModeStats | undefined, result: GameResult
     };
 };
 
-export const updateStatsWithResult = (result: GameResult): StoredStats => {
+export const updateStatsWithResult = async (result: GameResult): Promise<StoredStats> => {
     const current = getStoredStats();
     const updatedModeStats = getUpdatedModeStats(current.modes[result.modeId], result);
 
@@ -148,9 +148,12 @@ export const updateStatsWithResult = (result: GameResult): StoredStats => {
     
     // FORWARD TO DASHBOARD STORAGE (aimsync_stats)
     // We dynamically import to avoid circular dependency issues
-    import('./storage').then(({ StorageEngine }) => {
-        StorageEngine.saveGameResult(result);
-    }).catch(err => console.error("Failed to forward telemetry to dashboard", err));
+    try {
+        const { StorageEngine } = await import('./storage');
+        await StorageEngine.saveGameResult(result);
+    } catch (err) {
+        console.error("Failed to forward telemetry to dashboard", err);
+    }
 
     return updated;
 };

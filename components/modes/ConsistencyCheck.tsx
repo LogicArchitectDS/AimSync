@@ -228,6 +228,9 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
         return { score: stability, label };
     };
 
+    const latestStateRef = useRef({ score, hits, misses, reactionTimes, totalTargetsSpawned, missedByTimeout });
+    latestStateRef.current = { score, hits, misses, reactionTimes, totalTargetsSpawned, missedByTimeout };
+
     const endSession = async () => {
         clearAnimation();
         clearTargetTimeout();
@@ -238,52 +241,34 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
             await document.exitFullscreen().catch(() => {});
         }
 
-        // Use functional setState to read fresh values and avoid stale closures
-        setReactionTimes(rt => {
-            const { score: stabilityScore, label: stabilityLabel } = computeStability(rt);
+        const { score: s, hits: h, misses: m, reactionTimes: rt, totalTargetsSpawned: sp, missedByTimeout: mt } = latestStateRef.current;
+        const { score: stabilityScore, label: stabilityLabel } = computeStability(rt);
 
-            setHits(h => {
-                setMisses(m => {
-                    setScore(s => {
-                        setTotalTargetsSpawned(sp => {
-                            setMissedByTimeout(mt => {
-                                const resultData = buildGameResult({
-                                    mode: "consistency-check",
-                                    difficulty: difficultyLabels[effectiveDifficulty],
-                                    score: s,
-                                    hits: h,
-                                    misses: m,
-                                    duration: effectiveDuration,
-                                    reactionTimes: rt,
-                                    totalTargetsSpawned: sp,
-                                    missedByTimeout: mt,
-                                    extraStats: {
-                                        "Stability Score": `${stabilityScore}%`,
-                                        "Assessment":      stabilityLabel,
-                                        "Std Dev Track":   `${Math.round(rt.length > 0 ? Math.sqrt(rt.reduce((a, t) => a + Math.pow(t - rt.reduce((x, y) => x + y, 0) / rt.length, 2), 0) / rt.length) : 0)}ms`,
-                                    },
-                                });
-
-                                updateStatsWithResult(resultData);
-
-                                if (onFinish) {
-                                    onFinish(resultData);
-                                } else {
-                                    setResult(resultData);
-                                    setIsFinished(true);
-                                }
-                                return mt;
-                            });
-                            return sp;
-                        });
-                        return s;
-                    });
-                    return m;
-                });
-                return h;
-            });
-            return rt;
+        const resultData = buildGameResult({
+            mode: "consistency-check",
+            difficulty: difficultyLabels[effectiveDifficulty],
+            score: s,
+            hits: h,
+            misses: m,
+            duration: effectiveDuration,
+            reactionTimes: rt,
+            totalTargetsSpawned: sp,
+            missedByTimeout: mt,
+            extraStats: {
+                "Stability Score": `${stabilityScore}%`,
+                "Assessment":      stabilityLabel,
+                "Std Dev Track":   `${Math.round(rt.length > 0 ? Math.sqrt(rt.reduce((a, t) => a + Math.pow(t - rt.reduce((x, y) => x + y, 0) / rt.length, 2), 0) / rt.length) : 0)}ms`,
+            },
         });
+
+        await updateStatsWithResult(resultData);
+
+        if (onFinish) {
+            onFinish(resultData);
+        } else {
+            setResult(resultData);
+            setIsFinished(true);
+        }
     };
 
     // ─────────────────────────────────────────────────────────

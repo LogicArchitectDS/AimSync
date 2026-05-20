@@ -33,20 +33,20 @@ export const StorageEngine = {
     },
 
     // --- 2. HYBRID SAVE (Local + Cloud) ---
-    saveUserStats: (stats: UserStats) => {
+    saveUserStats: async (stats: UserStats): Promise<void> => {
         if (typeof window === 'undefined') return;
 
         // A. Instant Local Save (UI updates instantly without waiting for network)
         localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(stats));
 
-        // B. Background Cloud Sync (Fire and forget)
+        // B. Background Cloud Sync (Await network save)
         const sessionRaw = localStorage.getItem(STORAGE_KEYS.SESSION);
         if (sessionRaw) {
             try {
                 const session = JSON.parse(sessionRaw);
                 // Only sync if it's a real user (not a trial guest)
                 if (session.user?.id && !session.isTrial) {
-                    fetch('/api/scores', {
+                    await fetch('/api/scores', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ userId: session.user.id, stats })
@@ -59,7 +59,7 @@ export const StorageEngine = {
     },
 
     // --- 3. GAME COMPLETION HANDLER ---
-    saveGameResult: (result: GameResult) => {
+    saveGameResult: async (result: GameResult): Promise<void> => {
         const stats = StorageEngine.getUserStats();
 
         // Ensure xpFactors object exists
@@ -125,9 +125,9 @@ export const StorageEngine = {
         const sessionXp = result.score * 10;
         stats.xp = (stats.xp || 0) + sessionXp;
 
-        // Level up formula (100 * level^2)
+        // Level up formula (500 * level^2)
         let currentLevel = stats.level || 1;
-        while (stats.xp >= Math.pow(currentLevel, 2) * 100) {
+        while (stats.xp >= Math.pow(currentLevel, 2) * 500) {
             currentLevel++;
         }
         stats.level = currentLevel;
@@ -171,7 +171,7 @@ export const StorageEngine = {
         }
 
         // Save (Triggers local + cloud sync simultaneously)
-        StorageEngine.saveUserStats(stats);
+        await StorageEngine.saveUserStats(stats);
     },
 
     // --- 4. PLAYLIST MANAGEMENT ---

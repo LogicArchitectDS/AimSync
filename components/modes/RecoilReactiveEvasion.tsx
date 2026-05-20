@@ -143,7 +143,7 @@ export default function RecoilReactiveEvasion({ overrideSettings, onFinish }: Re
         setResult(null);
     };
 
-    const endSession = () => {
+    const endSession = async () => {
         setGameStarted(false);
         stopFiring();
         isFiringInternal.current = false;
@@ -158,7 +158,7 @@ export default function RecoilReactiveEvasion({ overrideSettings, onFinish }: Re
             reactionTimes: [], // Tracking mode doesn't usually use RT
         });
 
-        updateStatsWithResult(resultData);
+        await updateStatsWithResult(resultData);
         setResult(resultData);
         setIsFinished(true);
 

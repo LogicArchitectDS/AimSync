@@ -36,6 +36,7 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
     const timeoutRef    = useRef<number | null>(null);
     const sessionIdxRef     = useRef(0);
     const sessionStartRef = useRef<number>(0);
+    const activeTargetId = useRef<string | null>(null);
     const dimensionsRef = useRef({ width: 1600, height: 900 });
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
 
@@ -188,6 +189,7 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
             dimensionsRef.current.height,
             radius
         );
+        activeTargetId.current = next.id;
         setTarget(next);
         setTotalTargetsSpawned(p => p + 1);
 
@@ -202,6 +204,7 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
 
     const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
         if (phase !== "ACTIVE" || !target) return;
+        if (target.id !== activeTargetId.current) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
 
@@ -255,7 +258,7 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
         }, 800);
     };
 
-    const runCalculation = (
+    const runCalculation = async (
         finalHits: number,
         finalMisses: number,
         finalScore: number,
@@ -291,7 +294,7 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
 
         const benchmarkResult: GameResult = { ...resultData, isBenchmark: true };
 
-        updateStatsWithResult(benchmarkResult);
+        await updateStatsWithResult(benchmarkResult);
         setPenaltyApplied(appliedPenalty);
         setResult(benchmarkResult);
         setIsFinished(true);

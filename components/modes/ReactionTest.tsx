@@ -23,6 +23,7 @@ export default function ReactionTest({
     const [result, setResult] = useState<GameResult | null>(null);
 
     // Test States
+    const [reduceFlash, setReduceFlash] = useState(false);
     const [gameState, setGameState] = useState<"waiting" | "ready" | "clicked" | "early">("waiting");
     const [attempts, setAttempts] = useState(0);
     const [reactionTimes, setReactionTimes] = useState<number[]>([]);
@@ -186,6 +187,19 @@ export default function ReactionTest({
                         <button onClick={startGame} className="w-full px-12 py-5 bg-[#eab308] text-[#121212] text-lg font-black tracking-[0.2em] rounded-xl hover:bg-white hover:text-[#eab308] transition-all">
                             INITIALIZE SEQUENCE
                         </button>
+
+                        <div className="flex justify-center items-center space-x-2 mt-6 text-sm text-gray-300">
+                            <input 
+                                type="checkbox" 
+                                id="reduceFlash" 
+                                checked={reduceFlash} 
+                                onChange={(e) => setReduceFlash(e.target.checked)} 
+                                className="rounded border-white/20 bg-black/50 text-[#eab308] focus:ring-0 focus:ring-offset-0 cursor-pointer w-4 h-4"
+                            />
+                            <label htmlFor="reduceFlash" className="cursor-pointer font-medium select-none text-xs tracking-wider uppercase text-gray-400 hover:text-white transition-colors">
+                                Reduce Flash Intensity (Eye Strain Protection)
+                            </label>
+                        </div>
                     </div>
                 </div>
             )}
@@ -197,7 +211,11 @@ export default function ReactionTest({
                     ${gameState === "ready" ? "bg-[#14532d]" : ""}
                     ${gameState === "early" ? "bg-[#450a0a]" : ""}
                     ${gameState === "clicked" ? "bg-[#1e3a8a]" : ""}
-                `}>
+                `}
+                style={{
+                    filter: reduceFlash && gameState === "ready" ? "brightness(0.85)" : "none",
+                    transition: "filter 0.3s ease"
+                }}>
 
                     {/* Visual Cues */}
                     <div className="text-center pointer-events-none">

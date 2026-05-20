@@ -9,7 +9,7 @@ const XP_CONSTANT = 0.1;
  */
 export function getLevelFromXp(xp: number): number {
     if (xp < 0) return 1;
-    return Math.floor(XP_CONSTANT * Math.sqrt(xp)) + 1;
+    return Math.floor(Math.sqrt(xp / 500)) + 1;
 }
 
 /**
@@ -17,7 +17,7 @@ export function getLevelFromXp(xp: number): number {
  */
 export function getXpRequirementForLevel(level: number): number {
     if (level <= 1) return 0;
-    return Math.pow((level - 1) / XP_CONSTANT, 2);
+    return 500 * Math.pow(level - 1, 2);
 }
 
 /**

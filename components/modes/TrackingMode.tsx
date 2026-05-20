@@ -51,7 +51,7 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
     const missesRef = useRef(0);
     const missedByTimeoutRef = useRef(0);
 
-    const endSessionCallback = useCallback(() => {
+    const endSessionCallback = useCallback(async () => {
         if (animationFrameRef.current) {
             cancelAnimationFrame(animationFrameRef.current);
             animationFrameRef.current = null;
@@ -70,7 +70,7 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
             taskId: overrideSettings?.taskId,
         });
 
-        updateStatsWithResult(resultData);
+        await updateStatsWithResult(resultData);
 
         if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 
@@ -159,7 +159,7 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
                     t.x, t.y, t.radius
                 );
                 if (isHit) {
-                    gradient.addColorStop(0, "#FFFFFF");
+                    gradient.addColorStop(0, "#CBD5E1");
                     gradient.addColorStop(0.3, "#00E5FF");
                     gradient.addColorStop(1, "#004455");
                 } else {
