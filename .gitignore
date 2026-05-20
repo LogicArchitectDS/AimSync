@@ -40,5 +40,36 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# wrangler / cloudflare workers
+.wrangler/
+.dev.vars
+worker-configuration.d.ts
+wrangler.toml.bak
+
+# turbopack / turbo
+.turbo/
+
+# eslint cache
+.eslintcache
+
+# stylelint cache
+.stylelintcache
+
+# parcel
+.parcel-cache/
+.cache/
+
+# swc
+.swc/
+
+# prisma
+/prisma/migrations/**/*.sql
+!prisma/migrations
+
+# misc tooling caches & state
+.cache/
+*.log
+*.lock.bak
+
 #changes
 changes.txt
