@@ -1,31 +1,28 @@
 -- progression-schema.sql
 
--- 1. Track global player stats across the 6 AimSync Factors
-CREATE TABLE IF NOT EXISTS player_profiles (
+DROP TABLE IF EXISTS scores_telemetry;
+DROP TABLE IF EXISTS user_progression;
+
+CREATE TABLE user_progression (
     user_id TEXT PRIMARY KEY,
-    username TEXT,
-    
-    -- The 6 Pillars of Aiming
-    xp_flicking INTEGER DEFAULT 0,
-    xp_tracking INTEGER DEFAULT 0,
-    xp_speed INTEGER DEFAULT 0,
-    xp_precision INTEGER DEFAULT 0,
-    xp_perception INTEGER DEFAULT 0,
-    xp_cognition INTEGER DEFAULT 0,
-    
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    current_level INTEGER DEFAULT 1,
+    total_xp INTEGER DEFAULT 0,
+    surgeon_badge_unlocked INTEGER DEFAULT 0,
+    vector_lock_badge_unlocked INTEGER DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. Track live progress on assigned tasks
-CREATE TABLE IF NOT EXISTS active_tasks (
+CREATE TABLE scores_telemetry (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
-    task_id TEXT NOT NULL,          
-    task_type TEXT NOT NULL,        
-    reward_factor TEXT NOT NULL,    -- So the DB knows which column to update upon completion!
-    current_progress REAL DEFAULT 0,
-    is_completed BOOLEAN DEFAULT 0,
-    assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    expires_at DATETIME NOT NULL,
-    FOREIGN KEY(user_id) REFERENCES player_profiles(user_id)
+    exercise_id TEXT NOT NULL,
+    hits INTEGER NOT NULL,
+    misses INTEGER NOT NULL,
+    accuracy REAL NOT NULL,
+    max_combo INTEGER NOT NULL,
+    duration_seconds INTEGER NOT NULL,
+    xp_earned INTEGER NOT NULL,
+    integrity_flag TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES user_progression(user_id)
 );
