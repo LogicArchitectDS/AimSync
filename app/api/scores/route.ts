@@ -72,10 +72,10 @@ export async function POST(request: Request) {
                 last_played_at  = CURRENT_TIMESTAMP
         `).bind(
             userId,
-            stats.globalAccuracy    || 0,
-            stats.totalGamesPlayed  || 0,
+            stats.globalAccuracy || 0,
+            stats.totalGamesPlayed || 0,
             stats.timePlayedSeconds || 0,
-            JSON.stringify(stats.modes     || {}),
+            JSON.stringify(stats.modes || {}),
             JSON.stringify(stats.playlists || []),
         ).run();
 
