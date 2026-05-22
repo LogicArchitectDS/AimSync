@@ -77,3 +77,8 @@ AimSync Codebase Evolution & Integration Log
     - Transitioned canvas hit-detection event listeners in click-based modes (`StaticFlick.tsx`, `CognitiveOverdrive.tsx`, `TargetSwitch.tsx`, `FlickBenchmark.tsx`, `Echolocation.tsx`) from the React `onClick` event to immediate `onMouseDown` interaction to eliminate latency when players flick away from a target.
     - Added a timestamp-based input cooldown/debouncing guard (80ms throttle) to prevent physical button double-triggers, contact bounce, and rendering race conditions causing rapid duplicate spawning or premature misses.
     - Verified all modes build cleanly without any TypeScript compilation errors.
+
+14. Local API Fallbacks & Aesthetic UI Polishing
+    - Suppressed redundant local console error logging (503 Service Unavailable status messages) by establishing mock fallback data schemas inside the GET `/api/scores` route when the Cloudflare D1 database binding is absent in local development environments.
+    - Refactored native HTML select drop-down selectors for game Difficulty and Duration inside `CustomRoutine.tsx` and the dashboard's "Create Regimen" modal, transforming them into premium, fully responsive button matrices.
+    - Replaced the default browser `confirm()` dialogue prompt with a bespoke glassmorphic warning modal on daily contract abandonment to match the core cyberpunk hud theme.
