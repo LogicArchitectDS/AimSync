@@ -82,3 +82,36 @@ AimSync Codebase Evolution & Integration Log
     - Suppressed redundant local console error logging (503 Service Unavailable status messages) by establishing mock fallback data schemas inside the GET `/api/scores` route when the Cloudflare D1 database binding is absent in local development environments.
     - Refactored native HTML select drop-down selectors for game Difficulty and Duration inside `CustomRoutine.tsx` and the dashboard's "Create Regimen" modal, transforming them into premium, fully responsive button matrices.
     - Replaced the default browser `confirm()` dialogue prompt with a bespoke glassmorphic warning modal on daily contract abandonment to match the core cyberpunk hud theme.
+
+15. Web Audio API Synthesizer Engine
+    - Created `lib/services/audioEngine.ts` as a singleton service class wrapping a single lazily-constructed `AudioContext` instance (with `webkitAudioContext` Safari fallback).
+    - Implemented `init()` / `resume()` / `suspend()` lifecycle controls to satisfy browser autoplay policy — context is created on the first confirmed user gesture (session begin) and suspended on session end to conserve CPU cycles between drills.
+    - Implemented `playHitSound(currentCombo)` using a sine oscillator with an exponential pitch crescendo formula: f = 440 × (1 + ln(1 + combo/15)), giving immediate audio-tracked feedback as combo multiplier climbs. Gain decays to 0.0001 in 80ms with node released at 100ms.
+    - Implemented `playMissSound()` using a sawtooth oscillator sweeping from 120Hz → 80Hz over 150ms to produce a distinct failure buzz contour without being irritating.
+    - Applied strict garbage collection discipline: every `OscillatorNode` and `GainNode` is explicitly `.disconnect()`ed via `onended` callback to prevent progressive audio thread leaks.
+    - Wired engine into `useBaseGameEngine.ts`: `audioEngine.init()` + `audioEngine.resume()` called inside `beginSession`, `playHitSound(comboRef.current)` inside `triggerHit`, `playMissSound()` inside both `triggerMiss` and `incrementTimeoutMiss`, and `audioEngine.suspend()` replaces the dead `window.audioPool` legacy code in `muteAudioPool`.
+    - All synthesis is scheduled on the AudioContext timeline — completely decoupled from the `requestAnimationFrame` canvas loop, preserving 144Hz targets on low-spec hardware.
+
+16. Coalesced Pointer Lock Raw Input Architecture
+    - Implemented the Pointer Lock API directly on the game canvas within `useBaseGameEngine.ts` to bypass the browser's standard cursor and access OS-level raw hardware mouse data.
+    - Lock is requested exclusively when `phaseRef.current === "live"` via a `mousedown` listener on the canvas, using `{ unadjustedMovement: true }` to bypass OS mouse acceleration curves. Dual-level fallback: if the `unadjustedMovement` hint is rejected (unsupported browser/user denial), retries with a plain `requestPointerLock()` call.
+    - Replaced the previous `clientX - rect.left` absolute-coordinate mouse handler with a coalesced delta integration loop: on every `mousemove` event, all sub-frame input packets are retrieved via `e.getCoalescedEvents()` (casting to `PointerEvent` for TypeScript compatibility) and their `movementX/Y` deltas are summed before a single `mousePosRef` write.
+    - This prevents data loss on 1000Hz–8000Hz gaming mice where up to 55 input packets occur between 144Hz display frames.
+    - Graceful fallback path for browsers without `getCoalescedEvents` support falls back to single `e.movementX / e.movementY` delta reads.
+    - Integrated viewport boundary clamping: cursor position is constrained to the active mode's `spawnBoundingBox` (fractional bounds from `modeRegistry.ts` multiplied by `dimensionsRef` pixel values) so the virtual crosshair can never escape the exercise grid.
+    - Standard absolute-coordinate positioning (`clientX - rect.left`) is preserved as the non-locked fallback path for menu, countdown, and results screen phases.
+    - Added a `phaseRef` mirror ref that stays synchronized through all four phase transitions (`menu`, `countdown`, `live`, `finished`) so the event-listener closure always reads the true current phase without stale capture.
+    - `document.exitPointerLock()` is called in both `endSession` and `resetToMenu` before `exitFullscreen`, ensuring cursor is returned to the user on all session exit paths.
+
+17. Advanced Kinematic Telemetry — Urgency Index & Over-Flicking Coefficient
+    - Created `lib/hooks/useKinematicsTracker.ts`: a lightweight, pure ref-based telemetry tracker that records timestamped mouse path checkpoints during clicking-centric drills (StaticFlick, FlickBenchmark). Zero React state writes — all data lives in `useRef` dictionaries to guarantee zero frame drops.
+    - On target spawn, records initial Euclidean distance from cursor to target centre and seeds the path log with the spawn cursor position.
+    - On every `mousemove` event (separate lightweight canvas listener, active only during `live` phase), appends `{x, y, t}` path points at ≥2ms intervals, tracks `firstMoveTime`, `peakVelocity` (px/ms), and `decelerationStartTime` (triggered when instantaneous velocity drops below 40% of recorded peak).
+    - On confirmed hit click, `computeOnHit()` applies both diagnostic formulas and immediately frees the dictionary entry:
+      - Urgency Index (UI) = AdjustmentWindow / (ReactionWindow + 1), where ReactionWindow = firstMoveTime − spawnTime, AdjustmentWindow = clickTime − decelerationStartTime.
+      - Over-Flick Coefficient (OFC) = cumulativePathDistance / initialDistance. OFC > 1.15 confirms routine target over-shooting with reverse micro-adjustment corrections.
+    - Per-session rolling averages of UI and OFC are accumulated in plain refs inside each mode component and written to `engine.kinematicsExtraStatsRef.current` on every hit.
+    - Added `kinematicsExtraStatsRef` as a first-class typed ref exposed by `useBaseGameEngine`; `endSession` merges it into `extraStats` before `buildGameResult`, then clears it for the next session.
+    - Updated `app/api/scores/route.ts` POST handler to parse `averageUrgencyIndex` and `overFlickCoefficient` from the telemetry payload and insert both into `scores_telemetry` with `DEFAULT 1.0`. SQL `ALTER TABLE` migration statements are documented as inline comments for Cloudflare D1 deployment.
+    - Created `components/InsightsCard.tsx`: context-aware coaching card mounted on the dashboard that reads kinematic averages from `recentSessions` in localStorage, evaluates two threshold conditions (OFC > 1.20 → over-shooting warning; UI > 2.50 → micro-adjustment hesitancy alert), and renders matching glassmorphic coaching panels with animated entrance. All-clear state and no-data prompt also handled. Dynamically imported with `ssr: false` for localStorage safety.
+    - All three engineering systems verified with zero TypeScript compilation errors across the full project.

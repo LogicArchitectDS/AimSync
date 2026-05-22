@@ -17,6 +17,7 @@ import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
 import ComboMeter from "@/components/ComboMeter";
 import { spawnHitmarker } from "@/lib/utils/hitmarker";
+import { useKinematicsTracker } from "@/lib/hooks/useKinematicsTracker";
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; taskId?: string; }
 interface StaticFlickProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
@@ -37,6 +38,13 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
         onSessionComplete: onFinish,
     });
 
+    // ── Kinematics Tracker ──────────────────────────────────────────────────
+    const kinematics = useKinematicsTracker();
+    // Rolling session accumulators (refs — never trigger re-renders)
+    const kinUiSumRef    = useRef(0);
+    const kinOfcSumRef   = useRef(0);
+    const kinSampleCount = useRef(0);
+
     const config = difficultyConfig[effectiveDifficulty];
 
     const accuracy = calculateAccuracy(engine.hits, engine.misses);
@@ -55,8 +63,20 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
         setTarget(nextTarget);
         engine.incrementSpawned();
 
+        // Register the new target with the kinematic tracker.
+        // Use the current mousePosRef coordinates as the cursor-at-spawn position.
+        const { mousePosRef } = engine;
+        kinematics.registerTargetSpawn(
+            nextTarget.id,
+            nextTarget.x,
+            nextTarget.y,
+            mousePosRef.current.x,
+            mousePosRef.current.y
+        );
+
         engine.addTimeout(() => {
             if (engine.sessionIdxRef.current !== currentSession) return;
+            kinematics.discardTarget(nextTarget.id);
             engine.incrementTimeoutMiss(config.missPenalty);
             spawnTarget();
         }, config.targetLifetimeMs);
@@ -93,11 +113,41 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
 
     const lastClickTimeRef = useRef<number>(0);
 
+    // \u2500\u2500 Kinematic path recorder \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    // Subscribes to mousemove on the game canvas (separate from the base engine's
+    // crosshair handler) and pushes canvas-space coordinates into the tracker.
+    // Uses engine.mousePosRef (already updated by the base handler) for zero
+    // duplication of coordinate math.
+    useEffect(() => {
+        if (engine.phase !== "live") return;
+        const canvas = engine.canvasRef.current;
+        if (!canvas) return;
+
+        const onMove = () => {
+            const tid = activeTargetId.current;
+            if (!tid) return;
+            kinematics.recordMouseMove(
+                tid,
+                engine.mousePosRef.current.x,
+                engine.mousePosRef.current.y
+            );
+        };
+
+        canvas.addEventListener("mousemove", onMove);
+        return () => canvas.removeEventListener("mousemove", onMove);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [engine.phase, engine.canvasRef.current]);
+
     const handleStartGame = async () => {
         setTarget(null);
         lastHitTargetIdRef.current = null;
         lastClickTimeRef.current = 0;
         sessionStartRef.current = performance.now();
+        // Reset kinematics accumulators for the new session
+        kinematics.resetTracker();
+        kinUiSumRef.current    = 0;
+        kinOfcSumRef.current   = 0;
+        kinSampleCount.current = 0;
         engine.beginSession();
     };
 
@@ -128,9 +178,28 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
             if (target.id === lastHitTargetIdRef.current) return;
             lastHitTargetIdRef.current = target.id;
 
+            // ── Kinematic diagnostics ──────────────────────────────────────────
+            const kinResult = kinematics.computeOnHit(target.id);
+            if (kinResult) {
+                kinUiSumRef.current    += kinResult.urgencyIndex;
+                kinOfcSumRef.current   += kinResult.overFlickCoefficient;
+                kinSampleCount.current += 1;
+            }
+
             const reaction = performance.now() - target.spawnedAt;
             engine.triggerHit(reaction);
             engine.incrementScore(config.scorePerHit + (engine.combo * 5));
+
+            // Persist rolling kinematic session averages into kinematicsExtraStatsRef
+            // so they flow into the final GameResult.extraStats at session end.
+            const n = kinSampleCount.current;
+            if (n > 0) {
+                engine.kinematicsExtraStatsRef.current = {
+                    "Urgency Index":          parseFloat((kinUiSumRef.current  / n).toFixed(3)),
+                    "Over-Flick Coefficient": parseFloat((kinOfcSumRef.current / n).toFixed(3)),
+                };
+            }
+
             spawnHitmarker(event.clientX, event.clientY);
             spawnTarget();
             return;

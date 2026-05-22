@@ -15,6 +15,7 @@ import { useBaseGameEngine } from "@/lib/hooks/useBaseGameEngine";
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
 import { spawnHitmarker } from "@/lib/utils/hitmarker";
+import { useKinematicsTracker } from "@/lib/hooks/useKinematicsTracker";
 
 const BENCHMARK_DURATION = 60; // Locked 60s always
 
@@ -41,6 +42,12 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
         onSessionComplete: onFinish,
     });
 
+    // ── Kinematics Tracker ───────────────────────────────────────────────
+    const kinematics = useKinematicsTracker();
+    const kinUiSumRef    = useRef(0);
+    const kinOfcSumRef   = useRef(0);
+    const kinSampleCount = useRef(0);
+
     const accuracy = calculateAccuracy(engine.hits, engine.misses);
     const averageReactionTime = calculateAverageReactionTime(engine.reactionTimes);
     const bestReactionTime = calculateBestReactionTime(engine.reactionTimes);
@@ -59,8 +66,16 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
         setTarget(next);
         engine.incrementSpawned();
 
+        // Register with kinematics tracker
+        const { mousePosRef } = engine;
+        kinematics.registerTargetSpawn(
+            next.id, next.x, next.y,
+            mousePosRef.current.x, mousePosRef.current.y
+        );
+
         engine.addTimeout(() => {
             if (engine.sessionIdxRef.current !== currentSession) return;
+            kinematics.discardTarget(next.id);
             engine.incrementTimeoutMiss(benchmarkConfig.missPenalty);
             spawnTarget();
         }, benchmarkConfig.targetLifetimeMs);
@@ -108,6 +123,10 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
     const handleInitialize = async () => {
         setTarget(null);
         lastClickTimeRef.current = 0;
+        kinematics.resetTracker();
+        kinUiSumRef.current    = 0;
+        kinOfcSumRef.current   = 0;
+        kinSampleCount.current = 0;
         engine.beginSession();
     };
 
@@ -120,6 +139,21 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
         }
         prevPhaseRef.current = engine.phase;
     }, [engine.phase, spawnTarget]);
+
+    // ── Kinematic path recorder ────────────────────────────────────────────
+    useEffect(() => {
+        if (engine.phase !== "live") return;
+        const canvas = engine.canvasRef.current;
+        if (!canvas) return;
+        const onMove = () => {
+            const tid = activeTargetId.current;
+            if (!tid) return;
+            kinematics.recordMouseMove(tid, engine.mousePosRef.current.x, engine.mousePosRef.current.y);
+        };
+        canvas.addEventListener("mousemove", onMove);
+        return () => canvas.removeEventListener("mousemove", onMove);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [engine.phase, engine.canvasRef.current]);
 
     useEffect(() => {
         if (engine.phase === "finished") {
@@ -145,6 +179,21 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
         const { x, y } = getScaledCanvasCoordinates(e, canvas, engine.dimensions.width, engine.dimensions.height);
 
         if (isPointInsideTarget(x, y, target.x, target.y, target.radius)) {
+            // ── Kinematic diagnostics ─────────────────────────────────
+            const kinResult = kinematics.computeOnHit(target.id);
+            if (kinResult) {
+                kinUiSumRef.current    += kinResult.urgencyIndex;
+                kinOfcSumRef.current   += kinResult.overFlickCoefficient;
+                kinSampleCount.current += 1;
+            }
+            const n = kinSampleCount.current;
+            if (n > 0) {
+                engine.kinematicsExtraStatsRef.current = {
+                    "Urgency Index":          parseFloat((kinUiSumRef.current  / n).toFixed(3)),
+                    "Over-Flick Coefficient": parseFloat((kinOfcSumRef.current / n).toFixed(3)),
+                };
+            }
+
             const reaction = performance.now() - target.spawnedAt;
             engine.triggerHit(reaction);
             engine.incrementScore(benchmarkConfig.scorePerHit);

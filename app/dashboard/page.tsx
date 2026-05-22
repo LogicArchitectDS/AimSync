@@ -13,6 +13,11 @@ const RadarProfiler = dynamic(() => import('@/components/RadarProfiler'), {
     loading: () => <div className="w-full max-w-md h-[400px] animate-pulse bg-[#121212]/80 backdrop-blur-md rounded-3xl border border-white/5" />
 });
 
+const InsightsCard = dynamic(() => import('@/components/InsightsCard'), {
+    ssr: false,
+    loading: () => <div className="h-24 animate-pulse bg-surface/40 rounded-xl border border-white/5" />
+});
+
 // --- RANK CALCULATOR ---
 function getRankInfo(stats: UserStats) {
     if (stats.totalGamesPlayed < 5) return { tier: "Unranked", color: "text-slate-500", glow: "rgba(100,116,139,0.5)" };
@@ -755,6 +760,9 @@ export default function DashboardPage() {
                             <p className="text-[10px] text-slate-600 mt-2">{safeStats?.lastPlayedAt ? new Date(safeStats.lastPlayedAt).toLocaleDateString() : 'Never played'}</p>
                         </div>
                     </div>
+
+                    {/* MECHANICAL INSIGHTS */}
+                    <InsightsCard />
                 </div>
             </div>
         </div>

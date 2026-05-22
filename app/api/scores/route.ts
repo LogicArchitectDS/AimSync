@@ -94,6 +94,9 @@ export async function POST(request: Request) {
     const misses = typeof body.misses === 'number' ? body.misses : (body.rawScoreData?.misses ?? 0);
     const maxCombo = typeof body.maxCombo === 'number' ? body.maxCombo : (body.rawScoreData?.maxCombo ?? 0);
     const durationSeconds = typeof body.durationSeconds === 'number' ? body.durationSeconds : (body.rawScoreData?.durationSeconds ?? body.duration_seconds ?? 0);
+    // Advanced kinematic telemetry (StaticFlick / FlickBenchmark only; defaults to 1.0 for other modes)
+    const averageUrgencyIndex   = typeof body.averageUrgencyIndex   === 'number' ? body.averageUrgencyIndex   : 1.0;
+    const overFlickCoefficient  = typeof body.overFlickCoefficient  === 'number' ? body.overFlickCoefficient  : 1.0;
 
     const totalTargets = hits + misses;
     const accuracy = totalTargets > 0 ? (hits / totalTargets) * 100 : 0;
@@ -190,10 +193,18 @@ export async function POST(request: Request) {
         const levelUp = currentLevel > oldLevel;
 
         // Atomic D1 Execution
+        // SQL migration required on first deploy:
+        //   ALTER TABLE scores_telemetry ADD COLUMN average_urgency_index REAL DEFAULT 1.0;
+        //   ALTER TABLE scores_telemetry ADD COLUMN over_flick_coefficient REAL DEFAULT 1.0;
         const stmtTelemetry = db.prepare(`
-            INSERT INTO scores_telemetry (user_id, exercise_id, hits, misses, accuracy, max_combo, duration_seconds, xp_earned, integrity_flag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).bind(userId, exerciseId, hits, misses, accuracy, maxCombo, durationSeconds, xpEarned, integrityFlag);
+            INSERT INTO scores_telemetry
+                (user_id, exercise_id, hits, misses, accuracy, max_combo, duration_seconds,
+                 xp_earned, integrity_flag, average_urgency_index, over_flick_coefficient)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+            userId, exerciseId, hits, misses, accuracy, maxCombo, durationSeconds,
+            xpEarned, integrityFlag, averageUrgencyIndex, overFlickCoefficient
+        );
 
         const stmtProgression = db.prepare(`
             INSERT INTO user_progression (user_id, current_level, total_xp, surgeon_badge_unlocked, vector_lock_badge_unlocked, updated_at)

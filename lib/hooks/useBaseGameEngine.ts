@@ -6,6 +6,7 @@ import { getModeConfig } from "@/lib/config/modeRegistry";
 import { buildGameResult } from "@/lib/utils/resultBuilder";
 import { updateStatsWithResult } from "@/lib/utils/statsStorage";
 import { difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
+import { audioEngine } from "@/lib/services/audioEngine";
 
 interface UseBaseGameEngineOptions {
   modeId: string;
@@ -23,6 +24,11 @@ export function useBaseGameEngine({
   onSessionComplete,
 }: UseBaseGameEngineOptions) {
   const [phase, setPhase] = useState<"menu" | "countdown" | "live" | "finished">("menu");
+  // Keep phaseRef in sync so mouse-event closures always read the current phase.
+  const _setPhaseWithRef = (p: "menu" | "countdown" | "live" | "finished") => {
+    phaseRef.current = p;
+    setPhase(p);
+  };
   const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
   const [duration, setDuration] = useState<number>(overrideSettings?.duration ?? 30);
   const [timeLeft, setTimeLeft] = useState<number>(overrideSettings?.duration ?? 30);
@@ -51,6 +57,14 @@ export function useBaseGameEngine({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const uiCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
+  // Mirror of `phase` state accessible inside event-listener closures without stale captures.
+  const phaseRef = useRef<"menu" | "countdown" | "live" | "finished">("menu");
+  /**
+   * Side-channel for kinematics-enabled game modes (StaticFlick, FlickBenchmark).
+   * Updated by the mode on every hit; merged into extraStats at endSession.
+   * Use a ref so writes are zero-cost (no re-renders).
+   */
+  const kinematicsExtraStatsRef = useRef<Record<string, number>>({});
   const [feedback, setFeedback] = useState<"hit" | "miss" | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -83,19 +97,9 @@ export function useBaseGameEngine({
   }, []);
 
   const muteAudioPool = useCallback(() => {
-    if (typeof window !== "undefined" && (window as any).audioPool) {
-      const pool = (window as any).audioPool;
-      if (Array.isArray(pool)) {
-        pool.forEach((audio: any) => {
-          try {
-            audio.pause();
-            audio.currentTime = 0;
-          } catch (e) {
-            // ignore
-          }
-        });
-      }
-    }
+    // Legacy window.audioPool has been removed.
+    // Suspend the Web Audio API context to silence all synthesis immediately.
+    audioEngine.suspend();
   }, []);
 
   const clearAllTimersAndLoops = useCallback(() => {
@@ -228,17 +232,86 @@ export function useBaseGameEngine({
     }
     uiCanvasRef.current = uiCanvas;
 
-    // Track mouse coordinates for drawing custom crosshair on ui-canvas
-    const handleMouseMove = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      mousePosRef.current = { x, y };
-
-      const { drawCrosshair } = require("@/lib/utils/canvasHelpers");
-      drawCrosshair(uiCanvas, dimensionsRef.current.width, dimensionsRef.current.height, x, y, feedback);
+    // ─── Pointer Lock request ────────────────────────────────────────────────
+    // Acquire pointer lock on mousedown only while a session is live so the
+    // user can still interact with the menu / results screens normally.
+    const handleStageMouseDown = () => {
+      if (phaseRef.current === "live" && document.pointerLockElement !== canvas) {
+        // unadjustedMovement bypasses OS mouse-acceleration curves for raw data.
+        // Cast to `any` to pass the non-standard options object without TS union errors.
+        try {
+          const result = (canvas.requestPointerLock as (opts?: Record<string, unknown>) => Promise<void> | void)(
+            { unadjustedMovement: true }
+          );
+          // Modern browsers return a Promise; swallow rejection gracefully.
+          if (result && typeof (result as Promise<void>).catch === "function") {
+            (result as Promise<void>).catch(() => {
+              // Fallback: retry without the unadjustedMovement hint.
+              canvas.requestPointerLock();
+            });
+          }
+        } catch {
+          canvas.requestPointerLock();
+        }
+      }
     };
 
+    // ─── Coalesced Pointer-Lock mouse-move handler ────────────────────────────
+    // When pointer lock is active, movementX/Y are OS-raw deltas (no acceleration).
+    // We accumulate sub-frame coalesced packets to prevent data loss between rAF
+    // ticks on high-polling-rate mice (1000 Hz – 8000 Hz).
+    const handleMouseMove = (e: MouseEvent) => {
+      const { drawCrosshair } = require("@/lib/utils/canvasHelpers");
+      const { width, height } = dimensionsRef.current;
+
+      if (document.pointerLockElement === canvas) {
+        // ── Accumulate coalesced sub-frame deltas ──────────────────────────
+        let accX = 0;
+        let accY = 0;
+
+        // getCoalescedEvents() is part of the PointerEvent spec (MDN). Cast from
+        // MouseEvent so TypeScript's lib.dom.d.ts can resolve the method signature.
+        const pe = e as PointerEvent;
+        if (typeof pe.getCoalescedEvents === "function") {
+          const packets = pe.getCoalescedEvents();
+          for (const evt of packets) {
+            accX += evt.movementX;
+            accY += evt.movementY;
+          }
+        } else {
+          // Graceful fallback: use single-event deltas.
+          accX = e.movementX;
+          accY = e.movementY;
+        }
+
+        // ── Integrate deltas and clamp to mode bounding box ───────────────
+        const config = getModeConfig(modeId);
+        const bb = config.spawnBoundingBox;
+        const minX = bb.minX * width;
+        const maxX = bb.maxX * width;
+        const minY = bb.minY * height;
+        const maxY = bb.maxY * height;
+
+        mousePosRef.current = {
+          x: Math.min(maxX, Math.max(minX, mousePosRef.current.x + accX)),
+          y: Math.min(maxY, Math.max(minY, mousePosRef.current.y + accY)),
+        };
+      } else {
+        // ── Standard absolute positioning (no pointer lock) ───────────────
+        const rect = canvas.getBoundingClientRect();
+        mousePosRef.current = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+        };
+      }
+
+      // Crosshair draw is synchronous within the event callback —
+      // completely decoupled from the rAF canvas loop.
+      const { x, y } = mousePosRef.current;
+      drawCrosshair(uiCanvas, width, height, x, y, null);
+    };
+
+    canvas.addEventListener("mousedown", handleStageMouseDown);
     canvas.addEventListener("mousemove", handleMouseMove);
 
     // Initial renders
@@ -250,6 +323,7 @@ export function useBaseGameEngine({
     drawCrosshair(uiCanvas, dimensionsRef.current.width, dimensionsRef.current.height, initialX, initialY, null);
 
     return () => {
+      canvas.removeEventListener("mousedown", handleStageMouseDown);
       canvas.removeEventListener("mousemove", handleMouseMove);
     };
   }, [canvasRef.current, modeId, dimensions.width, dimensions.height]);
@@ -269,7 +343,7 @@ export function useBaseGameEngine({
     if (countdown === null) return;
     if (countdown === 0) {
       setCountdown(null);
-      setPhase("live");
+      _setPhaseWithRef("live");
       return;
     }
     const id = window.setTimeout(() => {
@@ -306,8 +380,11 @@ export function useBaseGameEngine({
   const endSession = useCallback(async () => {
     clearAllTimersAndLoops();
     muteAudioPool();
-    setPhase("finished");
+    _setPhaseWithRef("finished");
 
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
     if (document.fullscreenElement) {
       await document.exitFullscreen().catch(() => {});
     }
@@ -364,9 +441,12 @@ export function useBaseGameEngine({
       misses: missesRef.current,
       duration: duration,
       reactionTimes: reactionTimesRef.current,
-      extraStats: extraStats,
+      // Merge any kinematic averages written by the game mode during the session.
+      extraStats: { ...extraStats, ...kinematicsExtraStatsRef.current },
       taskId: overrideSettings?.taskId,
     });
+    // Clear the kinematics side-channel for the next session.
+    kinematicsExtraStatsRef.current = {};
 
     if (modeId === "flick-benchmark") {
       resultData.isBenchmark = true;
@@ -383,6 +463,9 @@ export function useBaseGameEngine({
 
   const beginSession = useCallback(async () => {
     clearAllTimersAndLoops();
+    // Init (or resume) the audio engine on this confirmed user interaction.
+    audioEngine.init();
+    audioEngine.resume();
     muteAudioPool();
     sessionIdxRef.current++;
 
@@ -409,7 +492,7 @@ export function useBaseGameEngine({
       await containerRef.current.requestFullscreen().catch(() => {});
     }
 
-    setPhase("countdown");
+    _setPhaseWithRef("countdown");
     const countdownVal = modeId === "consistency-check" ? 5 : 3;
     setCountdown(countdownVal);
   }, [modeId, clearAllTimersAndLoops, muteAudioPool]);
@@ -430,8 +513,11 @@ export function useBaseGameEngine({
   const resetToMenu = useCallback(() => {
     clearAllTimersAndLoops();
     muteAudioPool();
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
     sessionIdxRef.current++;
-    setPhase("menu");
+    _setPhaseWithRef("menu");
     setTimeLeft(duration);
     setCountdown(null);
     setResult(null);
@@ -450,6 +536,10 @@ export function useBaseGameEngine({
     setMaxCombo(maxComboRef.current);
     setReactionTimes([...reactionTimesRef.current]);
 
+    // Synthesize adaptive hit tone – scheduled on AudioContext timeline,
+    // completely outside the rAF canvas loop.
+    audioEngine.playHitSound(comboRef.current);
+
     setFeedback("hit");
     const id = window.setTimeout(() => setFeedback(null), 150);
     timeoutRefs.current.push(id);
@@ -466,6 +556,9 @@ export function useBaseGameEngine({
       scoreRef.current = Math.max(0, scoreRef.current - penalty);
       setScore(scoreRef.current);
     }
+
+    // Synthesize miss buzz – off the rAF loop.
+    audioEngine.playMissSound();
 
     setFeedback("miss");
     const id = window.setTimeout(() => setFeedback(null), 150);
@@ -495,6 +588,9 @@ export function useBaseGameEngine({
       scoreRef.current = Math.max(0, scoreRef.current - penalty);
       setScore(scoreRef.current);
     }
+
+    // Target expired = broken rhythm, same buzz as an active miss.
+    audioEngine.playMissSound();
 
     setFeedback("miss");
     const id = window.setTimeout(() => setFeedback(null), 150);
@@ -539,5 +635,7 @@ export function useBaseGameEngine({
     addInterval,
     addAnimationFrame,
     clearAllTimersAndLoops,
+    mousePosRef,
+    kinematicsExtraStatsRef,
   };
 }
