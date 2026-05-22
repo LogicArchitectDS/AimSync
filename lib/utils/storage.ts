@@ -198,6 +198,9 @@ export const StorageEngine = {
 
     // --- 5. EDGE HYDRATION (Called on Login) ---
     syncFromCloud: async (userId: string) => {
+        if (!userId || userId === 'undefined' || userId === 'local' || userId === 'null') {
+            return null;
+        }
         try {
             const res = await fetch(`/api/scores?userId=${userId}`);
             if (res.ok) {

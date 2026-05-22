@@ -109,31 +109,44 @@ export default function CustomRoutine({ onFinish }: CustomRoutineProps) {
                     </div>
 
                     {/* Duration + Difficulty */}
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-4">
                         <div className="space-y-2">
                             <label className="text-xs font-bold tracking-widest text-gray-400 uppercase">Duration</label>
-                            <select
-                                value={duration}
-                                onChange={e => setDuration(Number(e.target.value))}
-                                className="w-full p-3 bg-black/50 border border-white/10 rounded-xl text-white font-bold outline-none focus:border-[#3366FF] transition-all"
-                            >
-                                <option value={15}>15s</option>
-                                <option value={30}>30s</option>
-                                <option value={60}>60s</option>
-                                <option value={120}>120s</option>
-                            </select>
+                            <div className="grid grid-cols-4 gap-2">
+                                {[15, 30, 60, 120].map(time => (
+                                    <button
+                                        key={time}
+                                        type="button"
+                                        onClick={() => setDuration(time)}
+                                        className={`p-3 text-sm font-bold tracking-wide rounded-xl border transition-all ${
+                                            duration === time
+                                                ? "bg-[#3366FF]/20 border-[#3366FF] text-[#3366FF] shadow-[0_0_15px_rgba(51,102,255,0.15)]"
+                                                : "bg-transparent border-white/10 text-gray-500 hover:border-white/30 hover:text-white"
+                                        }`}
+                                    >
+                                        {time}s
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                         <div className="space-y-2">
                             <label className="text-xs font-bold tracking-widest text-gray-400 uppercase">Difficulty</label>
-                            <select
-                                value={difficulty}
-                                onChange={e => setDifficulty(e.target.value as Difficulty)}
-                                className="w-full p-3 bg-black/50 border border-white/10 rounded-xl text-white font-bold outline-none focus:border-[#3366FF] transition-all"
-                            >
+                            <div className="grid grid-cols-4 gap-2">
                                 {DIFFICULTY_OPTIONS.map(opt => (
-                                    <option key={opt.key} value={opt.key}>{opt.label}</option>
+                                    <button
+                                        key={opt.key}
+                                        type="button"
+                                        onClick={() => setDifficulty(opt.key)}
+                                        className={`p-3 text-xs font-bold tracking-wide rounded-xl border transition-all ${
+                                            difficulty === opt.key
+                                                ? "bg-[#3366FF]/20 border-[#3366FF] text-[#3366FF] shadow-[0_0_15px_rgba(51,102,255,0.15)]"
+                                                : "bg-transparent border-white/10 text-gray-500 hover:border-white/30 hover:text-white"
+                                        }`}
+                                    >
+                                        {opt.label}
+                                    </button>
                                 ))}
-                            </select>
+                            </div>
                         </div>
                     </div>
 

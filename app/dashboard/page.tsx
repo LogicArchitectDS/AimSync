@@ -36,13 +36,14 @@ export default function DashboardPage() {
 
     // --- MODAL STATE ---
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
     const [newPlaylistName, setNewPlaylistName] = useState("");
     const [newPlaylistDesc, setNewPlaylistDesc] = useState("");
     const [draftTasks, setDraftTasks] = useState<PlaylistTask[]>([]);
 
     // Temporary states for the dropdowns inside the modal
     const [selectedMode, setSelectedMode] = useState("static-flick");
-    const [selectedDiff, setSelectedDiff] = useState("Normal");
+    const [selectedDiff, setSelectedDiff] = useState("Eco");
     const [selectedTime, setSelectedTime] = useState(60);
 
     const { user, isTrial, logout } = useAuth();
@@ -66,11 +67,7 @@ export default function DashboardPage() {
     };
 
     const handleAbandonDailyContract = () => {
-        if (confirm("Are you sure you want to abandon the current Daily Contract? This will wipe your progression for today.")) {
-            RoutineDirector.abortContract();
-            setDailyContract(null);
-            setIsContractActive(false);
-        }
+        setShowAbandonConfirm(true);
     };
 
     useEffect(() => {
@@ -248,6 +245,49 @@ export default function DashboardPage() {
     return (
         <div className="flex flex-col gap-8 w-full relative">
 
+            {/* --- ABANDON CONTRACT CONFIRMATION MODAL --- */}
+            {showAbandonConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fadeIn">
+                    <div className="bg-[#121212] border border-red-500/20 rounded-2xl p-8 w-full max-w-md shadow-[0_0_50px_rgba(239,68,68,0.15)] relative overflow-hidden">
+                        {/* Red accent line on top */}
+                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-red-500 via-rose-500 to-transparent" />
+                        
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="p-2.5 bg-red-500/10 rounded-lg text-red-500 border border-red-500/20">
+                                <svg className="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                            </div>
+                            <h3 className="text-lg font-black text-white uppercase tracking-widest">Abandon Contract</h3>
+                        </div>
+                        
+                        <p className="text-slate-400 text-xs mb-6 leading-relaxed">
+                            Are you sure you want to terminate the active Daily Contract? This will wipe your progression and status for today.
+                        </p>
+                        
+                        <div className="flex gap-2 justify-end">
+                            <button
+                                onClick={() => setShowAbandonConfirm(false)}
+                                className="px-5 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-lg border border-white/10 transition-all"
+                            >
+                                Dismiss
+                            </button>
+                            <button
+                                onClick={() => {
+                                    RoutineDirector.abortContract();
+                                    setDailyContract(null);
+                                    setIsContractActive(false);
+                                    setShowAbandonConfirm(false);
+                                }}
+                                className="px-5 py-2.5 bg-red-950/60 hover:bg-red-600 text-white text-[10px] font-black uppercase tracking-widest rounded-lg border border-red-500/30 hover:border-red-500 transition-all shadow-[0_0_15px_rgba(239,68,68,0.1)]"
+                            >
+                                Terminate Contract
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* --- PLAYLIST CREATOR MODAL --- */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
@@ -263,25 +303,61 @@ export default function DashboardPage() {
                         </div>
 
                         {/* Task Selector */}
-                        <div className="bg-white/5 border border-white/10 rounded-lg p-4 mb-6">
-                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Add Exercise</h3>
-                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                                <select className="bg-black text-white text-xs p-2 rounded border border-white/10 sm:col-span-2" value={selectedMode} onChange={(e) => setSelectedMode(e.target.value)}>
-                                    {baseModes.map(m => <option key={m.mode} value={m.mode}>{m.name}</option>)}
-                                </select>
-                                <select className="bg-black text-white text-xs p-2 rounded border border-white/10" value={selectedDiff} onChange={(e) => setSelectedDiff(e.target.value)}>
-                                    <option value="Eco">Eco</option>
-                                    <option value="Bonus">Bonus</option>
-                                    <option value="Force Buy">Force Buy</option>
-                                    <option value="Full Buy">Full Buy</option>
-                                </select>
-                                <select className="bg-black text-white text-xs p-2 rounded border border-white/10" value={selectedTime} onChange={(e) => setSelectedTime(Number(e.target.value))}>
-                                    <option value={30}>30s</option>
-                                    <option value={60}>60s</option>
-                                    <option value={120}>120s</option>
-                                </select>
+                        <div className="bg-white/5 border border-white/10 rounded-xl p-5 mb-6">
+                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Add Exercise</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                                <div className="flex flex-col gap-1.5 md:col-span-2">
+                                    <span className="text-[10px] font-black tracking-widest text-slate-500 uppercase">Exercise Mode</span>
+                                    <select className="bg-black/50 text-white text-xs p-2.5 rounded-lg border border-white/10 focus:outline-none focus:border-blue-500 font-bold transition-all h-[38px] cursor-pointer" value={selectedMode} onChange={(e) => setSelectedMode(e.target.value)}>
+                                        {baseModes.map(m => <option key={m.mode} value={m.mode}>{m.name}</option>)}
+                                    </select>
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                    <span className="text-[10px] font-black tracking-widest text-slate-500 uppercase">Difficulty</span>
+                                    <div className="grid grid-cols-4 gap-0.5 bg-black/40 p-1 border border-white/10 rounded-lg h-[38px]">
+                                        {['Eco', 'Bonus', 'Force Buy', 'Full Buy'].map((diffOption) => {
+                                            const isActive = selectedDiff === diffOption;
+                                            return (
+                                                <button
+                                                    key={diffOption}
+                                                    type="button"
+                                                    onClick={() => setSelectedDiff(diffOption)}
+                                                    className={`rounded text-[9px] font-black uppercase tracking-wider transition-all truncate px-0.5 ${
+                                                        isActive
+                                                            ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(59,130,246,0.3)]'
+                                                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                                    }`}
+                                                >
+                                                    {diffOption === 'Force Buy' ? 'Force' : diffOption === 'Full Buy' ? 'Full' : diffOption}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                    <span className="text-[10px] font-black tracking-widest text-slate-500 uppercase">Time Limit</span>
+                                    <div className="grid grid-cols-3 gap-0.5 bg-black/40 p-1 border border-white/10 rounded-lg h-[38px]">
+                                        {[30, 60, 120].map((tOption) => {
+                                            const isActive = selectedTime === tOption;
+                                            return (
+                                                <button
+                                                    key={tOption}
+                                                    type="button"
+                                                    onClick={() => setSelectedTime(tOption)}
+                                                    className={`rounded text-[9px] font-black uppercase tracking-wider transition-all ${
+                                                        isActive
+                                                            ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(59,130,246,0.3)]'
+                                                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                                    }`}
+                                                >
+                                                    {tOption}s
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
                             </div>
-                            <button onClick={handleAddTaskToDraft} className="mt-3 w-full py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-bold uppercase tracking-widest rounded transition-colors">+ Add to Queue</button>
+                            <button onClick={handleAddTaskToDraft} className="mt-4 w-full py-2.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 hover:text-blue-300 text-xs font-black uppercase tracking-widest rounded-lg border border-blue-500/20 transition-all">+ Add to Queue</button>
                         </div>
 
                         {/* Draft Queue Preview */}

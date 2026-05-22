@@ -84,22 +84,7 @@ export const RoutineDirector = {
     localStorage.removeItem(STORAGE_KEY);
   },
 
-  // Compute accuracy trend from database history or localStorage fallback
-  async getHistoricalAccuracyTrend(userId: string): Promise<number> {
-    try {
-      const res = await fetch(`/api/scores?userId=${userId}&history=true`);
-      if (res.ok) {
-        const history = await res.json();
-        if (Array.isArray(history) && history.length > 0) {
-          const sum = history.reduce((acc: number, curr: any) => acc + (curr.accuracy || 0), 0);
-          return sum / history.length;
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to fetch score history from D1, falling back to local storage", e);
-    }
-
-    // Local Storage Fallback
+  getLocalAccuracyFallback(): number {
     const localStats = StorageEngine.getUserStats();
     let totalAcc = 0;
     let count = 0;
@@ -115,6 +100,27 @@ export const RoutineDirector = {
     }
 
     return 85.0; // Default baseline if no data exists
+  },
+
+  // Compute accuracy trend from database history or localStorage fallback
+  async getHistoricalAccuracyTrend(userId: string): Promise<number> {
+    if (!userId || userId === 'undefined' || userId === 'local' || userId === 'null') {
+      return this.getLocalAccuracyFallback();
+    }
+    try {
+      const res = await fetch(`/api/scores?userId=${userId}&history=true`);
+      if (res.ok) {
+        const history = await res.json();
+        if (Array.isArray(history) && history.length > 0) {
+          const sum = history.reduce((acc: number, curr: any) => acc + (curr.accuracy || 0), 0);
+          return sum / history.length;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to fetch score history from D1, falling back to local storage", e);
+    }
+
+    return this.getLocalAccuracyFallback();
   },
 
   // Initialize a new contract
