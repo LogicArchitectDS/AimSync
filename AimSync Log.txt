@@ -1,0 +1,79 @@
+AimSync Codebase Evolution & Integration Log
+
+1. Project Foundations & Tooling (Next.js 16 / React 19)
+   - Initialized next-app scaffolding using the Next.js App Router (React Server Components, Suspense boundaries, Edge compatibility).
+   - Configured TypeScript types via `tsconfig.json` with root aliases (`@/*` mapping to `./*`).
+   - Integrated PostCSS processing (`postcss.config.mjs`) alongside Tailwind CSS configuration (`tailwind.config.ts`) and global CSS modules.
+   - Initialized ESLint rules (`eslint.config.mjs`) and next-env definitions (`next-env.d.ts`, `env.d.ts`).
+
+2. Core 2D Canvas Game Modes (components/modes/)
+   - Developed high-framerate HTML5 Canvas game engines using requestAnimationFrame (rAF) loops:
+     - Static Flick (`StaticFlick.tsx`): Integrates combo multiplier state (`combo`), score penalty structures, target timers (`targetLifetimeMs`), and difficulty scaling (`getScaledRadius`).
+     - Continuous Tracking (`TrackingMode.tsx`): Renders target bouncing physics (coordinate updates with velocity vectors) and bounding-box border checks.
+     - Target Switch (`TargetSwitch.tsx`): Spawns waves of 1 target and decoy arrays; implements red-versus-blue node color logic.
+     - Micro Adjust (`MicroAdjust.tsx`): Sets target sizes to 35% scale (`config.targetRadius * 0.65`) and implements small relative offsets between successive targets.
+   - Built Custom Routine Compilers (`CustomRoutine.tsx` & `RoutineRunner.tsx`): Sequences playlists of up to 8 separate drills, maintaining duration and difficulty attributes.
+
+3. Core UI Layouts & Navigation
+   - Developed the Landing Home page (`app/page.tsx`) using Outfit typography, dark mode CSS styling, backdrop blur grids, and glassmorphic navigation cards.
+   - Created `components/Navbar.tsx` for state-driven route navigation between Leaderboards, Dashboard, and Login screens.
+   - Designed the primary Dashboard home page (`app/dashboard/page.tsx`) mapping game modules with visual indicators.
+
+4. Session Authentication & Guest Modes
+   - Created Auth screens (`app/auth/login/page.tsx` & `app/auth/register/page.tsx`).
+   - Built AuthContext (`lib/contexts/AuthContext.tsx`) implementing user guest-trial status flags to bypass DB writes.
+   - Enabled client-side profile picture updates, username constraint validators, and multi-target canvas click handling bugfixes.
+
+5. 3D Graphics Integration & Weapon Locker
+   - Integrated Three.js rendering dependencies via `@react-three/fiber` and `@react-three/drei`.
+   - Built `components/GunLocker.tsx` and custom 3D weapon skins/models (`components/WeaponModel.tsx`).
+   - Programmed the Valorant Crosshair Importer (decodes custom crosshair profile strings to extract line thickness, offsets, opacity, and center dot properties).
+   - Built custom canvas overlays for dynamic hitmarkers (`lib/utils/hitmarker.ts`) and crosshairs (`components/Crosshair.tsx`).
+
+6. Cloudflare D1 Integration & XP Progression Core
+   - Linked Cloudflare Wrangler binding database `DB` (`wrangler.toml`).
+   - Formulated the initial SQLite database schema `schema.sql` defining `training_sessions` and `player_stats` tables.
+   - Coded `lib/utils/statsService.ts` mapping XP multipliers (70% primary factor, 30% secondary factor) and leveling algorithms.
+
+7. 3D HRTF Spatial Audio & Recoil Compensation
+   - Programmed Echolocation (`Echolocation.tsx`): Implemented a full 3D first-person camera mode utilizing the Pointer Lock API. Utilizes the Web Audio API (`AudioContext`, `HRTF` panner model, `PannerNode`) to dynamically compute spatial sound queues based on 3D target coordinates relative to camera pitch and yaw.
+   - Programmed Recoil Evasion (`RecoilReactiveEvasion.tsx`): Simulates sustained weapon spray patterns (sinusoidal weapon climb, horizontal drift) using a custom `useRecoil` hook. Implements an active evasive target algorithm that dives in response to weapon spray.
+
+8. Hybrid Edge Syncing (NextAuth / JWT)
+   - Integrated Auth.js (`auth.ts`) with custom JSON Web Tokens (JWT) mapping user Discord IDs to requests.
+   - Developed edge API route `app/api/save-session/route.ts` running in `runtime = 'edge'` to concurrently update player profiles and log sessions.
+
+9. 2D Rebuilding & Safety Patches
+   - Rewrote `TargetSwitch.tsx` in a 2D HTML5 Canvas rendering model to resolve Three.js browser crashes.
+   - Refactored `TrackingMode.tsx` and `ConsistencyCheck.tsx` to utilize active crosshair Hover Proximity Tracking rather than standard click-down tracking.
+   - Handled dashboard routing anomalies inside `app/game/page.tsx`.
+   - Added brightness-dampened filters and warning screens to `ReactionTest.tsx` for photosensitivity safety.
+
+10. D1 Telemetry Sync & Centralized Registry
+    - Added progression tables (`user_progression` and `scores_telemetry`) to local D1 SQLite database via `progression-schema.sql`.
+    - Created Centralized Config Registry (`lib/config/modeRegistry.ts`) with a strict type interface `GameModeConfig` controlling combo status and target bounds. Re-exported in legacy paths (`lib/game/modeRegistry.ts`).
+    - Programmed API route `app/api/scores/route.ts` implementing:
+      - JWT session validation.
+      - Input velocity validation (flags runs with < 5s duration or > 15 inputs/sec as 'LOW_INTEGRITY').
+      - Level progression evaluations inside a `while` loop: XP needed = 500 * (Level)^2.
+      - Milestone checks for Surgeon and Vector Lock badges.
+      - Concurrent batch writes (`db.batch()`) with local mock fallback.
+    - Updated `components/ResultsScreen.tsx` with edge synchronization states, conditional layout cell filtering, and hardware-accelerated progress bar animations.
+
+11. Unified Polymorphic Game Loop Hook & Presenter Architecture Refactoring
+    - Centralized all isolated game loops across the 11 drills into a single, Unified Polymorphic Game Loop Hook (`lib/hooks/useBaseGameEngine.ts`).
+    - Standardized countdown timers, duration metrics, combo multipliers, scoring logic, and D1 database synchronization handlers within the core hook.
+    - Refactored presentation components (Static Flick, Flick Benchmark, Micro Adjust, Burst Reaction, Cognitive Overdrive, Tracking Mode, Consistency Check, Recoil Evasion, Reaction Test, Echolocation) to delegate state management and canvas telemetry to the hook.
+    - Integrated clean teardown optimization routines (clearing timeouts, intervals, animation frames, and halting active audio pools in `window.audioPool`) to prevent memory leaks and optimize performance on potato PCs.
+    - Upgraded difficulty types and aligned the registry configuration schema (`DetailedModeSchema` in `lib/config/modeRegistry.ts`) with internal math requirements.
+
+12. High-Refresh Layered Canvas Architecture, Daily Routine Director Integration & Code Cleanups
+    - Refactored the core polymorphic game hook (`useBaseGameEngine.ts`) and game presenter templates to support a layered HTML5 canvas strategy (CSS absolute positioning of separate background, active game, and crosshair/UI canvases).
+    - Integrated offscreen target rendering and canvas pre-rendering caching across multiple game modes (`StaticFlick`, `BurstReaction`, `TrackingMode`, `CognitiveOverdrive`) to optimize performance and frame timing.
+    - Implemented the `RoutineDirector` service to calculate daily contracts based on historical telemetry trends and locked down sandbox components while a contract is active.
+    - Resolved module loading order and temporal dead zone (TDZ) initialization bugs inside React hooks and build pathways.
+
+13. Target Click Registration & Input Cooldown Debouncing
+    - Transitioned canvas hit-detection event listeners in click-based modes (`StaticFlick.tsx`, `CognitiveOverdrive.tsx`, `TargetSwitch.tsx`, `FlickBenchmark.tsx`, `Echolocation.tsx`) from the React `onClick` event to immediate `onMouseDown` interaction to eliminate latency when players flick away from a target.
+    - Added a timestamp-based input cooldown/debouncing guard (80ms throttle) to prevent physical button double-triggers, contact bounce, and rendering race conditions causing rapid duplicate spawning or premature misses.
+    - Verified all modes build cleanly without any TypeScript compilation errors.

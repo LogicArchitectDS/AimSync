@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { BaseTarget, GameResult } from "@/lib/game/types";
 import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
 import {
@@ -11,133 +11,70 @@ import {
     isPointInsideTarget,
 } from "@/lib/utils/gameMath";
 import { createStaticTarget } from "@/lib/utils/targetSpawning";
-import { buildGameResult } from "@/lib/utils/resultBuilder";
-import { updateStatsWithResult } from "@/lib/utils/statsStorage";
+import { useBaseGameEngine } from "@/lib/hooks/useBaseGameEngine";
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
 import { spawnHitmarker } from "@/lib/utils/hitmarker";
 
-// ─────────────────────────────────────────────────────────────
-//  BENCHMARK CONSTANTS — Duration & accuracy threshold never change.
-// ─────────────────────────────────────────────────────────────
-const BENCHMARK_DURATION  = 60;     // Locked 60s always
-const ACCURACY_THRESHOLD  = 0.85;   // 85% accuracy floor
+const BENCHMARK_DURATION = 60; // Locked 60s always
 
 interface FlickBenchmarkProps {
     onFinish?: (res: GameResult) => void;
 }
 
-// PRE_MENU → COUNTDOWN → ACTIVE → CALCULATING → (ResultsScreen)
-type Phase = "PRE_MENU" | "COUNTDOWN" | "ACTIVE" | "CALCULATING";
-
 export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
-    const containerRef  = useRef<HTMLDivElement | null>(null);
-    const canvasRef     = useRef<HTMLCanvasElement | null>(null);
-    const timeoutRef    = useRef<number | null>(null);
-    const sessionIdxRef     = useRef(0);
-    const sessionStartRef = useRef<number>(0);
-    const activeTargetId = useRef<string | null>(null);
-    const dimensionsRef = useRef({ width: 1600, height: 900 });
-    const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
-
-    // Difficulty selected on pre-menu — user can pick, duration is still locked
     const [difficulty, setDifficulty] = useState<Difficulty>("hard");
     const benchmarkConfig = difficultyConfig[difficulty];
 
-    // Phase machine
-    const [phase,     setPhase]     = useState<Phase>("PRE_MENU");
-    const [countdown, setCountdown] = useState(3);
+    const [target, setTarget] = useState<BaseTarget | null>(null);
+    const activeTargetId = useRef<string | null>(null);
+    const lastClickTimeRef = useRef<number>(0);
+    const sessionStartRef = useRef<number>(0);
+    const [calculating, setCalculating] = useState(false);
 
-    // Live game state
-    const [timeLeft, setTimeLeft] = useState(BENCHMARK_DURATION);
-    const [target,   setTarget]   = useState<BaseTarget | null>(null);
-    const [score,    setScore]    = useState(0);
-    const [hits,     setHits]     = useState(0);
-    const [misses,   setMisses]   = useState(0);
-    const [reactionTimes,       setReactionTimes]       = useState<number[]>([]);
-    const [totalTargetsSpawned, setTotalTargetsSpawned] = useState(0);
-    const [missedByTimeout,     setMissedByTimeout]     = useState(0);
+    const engine = useBaseGameEngine({
+        modeId: "flick-benchmark",
+        overrideSettings: {
+            difficulty,
+            duration: BENCHMARK_DURATION,
+        },
+        onSessionComplete: onFinish,
+    });
 
-    // Results phase
-    const [result,        setResult]        = useState<GameResult | null>(null);
-    const [isFinished,    setIsFinished]    = useState(false);
-    const [penaltyApplied, setPenaltyApplied] = useState(false);
+    const accuracy = calculateAccuracy(engine.hits, engine.misses);
+    const averageReactionTime = calculateAverageReactionTime(engine.reactionTimes);
+    const bestReactionTime = calculateBestReactionTime(engine.reactionTimes);
 
-    const accuracy            = useMemo(() => calculateAccuracy(hits, misses),             [hits, misses]);
-    const averageReactionTime = useMemo(() => calculateAverageReactionTime(reactionTimes), [reactionTimes]);
-    const bestReactionTime    = useMemo(() => calculateBestReactionTime(reactionTimes),    [reactionTimes]);
+    const spawnTarget = useCallback(() => {
+        engine.clearAllTimersAndLoops();
+        const currentSession = engine.sessionIdxRef.current;
+        const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
+        const radius = getScaledRadius(benchmarkConfig.targetRadius, difficulty, elapsedSec, BENCHMARK_DURATION);
+        const next = createStaticTarget(
+            engine.dimensions.width,
+            engine.dimensions.height,
+            radius
+        );
+        activeTargetId.current = next.id;
+        setTarget(next);
+        engine.incrementSpawned();
 
-    // ─────────────────────────────────────────────────────────
-    //  PRE_MENU → Initialize button → COUNTDOWN
-    // ─────────────────────────────────────────────────────────
-    const handleInitialize = async () => {
-        sessionIdxRef.current++; // Kill switch for any lingering loops
-        if (containerRef.current && !document.fullscreenElement) {
-            await containerRef.current.requestFullscreen().catch(() => {});
-        }
-        setPhase("COUNTDOWN");
-        setCountdown(3);
-    };
-
-    // ─────────────────────────────────────────────────────────
-    //  COUNTDOWN: 3 → 2 → 1 → ACTIVE
-    // ─────────────────────────────────────────────────────────
-    useEffect(() => {
-        if (phase !== "COUNTDOWN") return;
-        if (countdown === 0) {
-            sessionStartRef.current = performance.now();
-            setPhase("ACTIVE");
+        engine.addTimeout(() => {
+            if (engine.sessionIdxRef.current !== currentSession) return;
+            engine.incrementTimeoutMiss(benchmarkConfig.missPenalty);
             spawnTarget();
-            return;
-        }
-        const t = window.setTimeout(() => setCountdown(c => c - 1), 1000);
-        return () => window.clearTimeout(t);
+        }, benchmarkConfig.targetLifetimeMs);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [phase, countdown]);
+    }, [benchmarkConfig, difficulty, engine.dimensions, engine.incrementSpawned, engine.incrementTimeoutMiss]);
 
-    // ─────────────────────────────────────────────────────────
-    //  ACTIVE: game timer
-    // ─────────────────────────────────────────────────────────
+    // Canvas render — target drawn as red sphere (same as StaticFlick)
     useEffect(() => {
-        if (phase !== "ACTIVE") return;
-        const t = window.setInterval(() => {
-            setTimeLeft(prev => Math.max(0, prev - 1));
-        }, 1000);
-        return () => window.clearInterval(t);
-    }, [phase]);
-
-    useEffect(() => {
-        if (phase === "ACTIVE" && timeLeft === 0) endSession();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [timeLeft, phase]);
-
-    // ─────────────────────────────────────────────────────────
-    //  Canvas resize observer
-    // ─────────────────────────────────────────────────────────
-    useEffect(() => {
-        if (phase !== "ACTIVE") return;
-        const updateSize = () => {
-            if (canvasRef.current?.parentElement) {
-                const { clientWidth, clientHeight } = canvasRef.current.parentElement;
-                dimensionsRef.current = { width: clientWidth, height: clientHeight };
-                setRenderDimensions({ width: clientWidth, height: clientHeight });
-            }
-        };
-        window.addEventListener("resize", updateSize);
-        updateSize();
-        return () => window.removeEventListener("resize", updateSize);
-    }, [phase]);
-
-    // ─────────────────────────────────────────────────────────
-    //  Canvas render — target drawn as red sphere (same as StaticFlick)
-    // ─────────────────────────────────────────────────────────
-    useEffect(() => {
-        const canvas = canvasRef.current;
+        const canvas = engine.canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
-        ctx.clearRect(0, 0, dimensionsRef.current.width, dimensionsRef.current.height);
+        ctx.clearRect(0, 0, engine.dimensions.width, engine.dimensions.height);
 
         if (target) {
             // Outer glow ring
@@ -159,207 +96,92 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
             ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2);
             ctx.fillStyle = gradient;
             ctx.shadowColor = "rgba(236, 72, 153, 0.7)";
-            ctx.shadowBlur  = 22;
+            ctx.shadowBlur = 22;
             ctx.shadowOffsetY = 8;
             ctx.fill();
             ctx.shadowColor = "transparent";
-            ctx.shadowBlur  = 0;
+            ctx.shadowBlur = 0;
             ctx.shadowOffsetY = 0;
         }
-    }, [target, renderDimensions]);
+    }, [target, engine.dimensions, engine.canvasRef]);
 
-    // ─────────────────────────────────────────────────────────
-    //  Helpers
-    // ─────────────────────────────────────────────────────────
-    const clearTargetTimeout = () => {
-        if (timeoutRef.current !== null) {
-            window.clearTimeout(timeoutRef.current);
-            timeoutRef.current = null;
-        }
+    const handleInitialize = async () => {
+        setTarget(null);
+        lastClickTimeRef.current = 0;
+        engine.beginSession();
     };
 
-    const spawnTarget = () => {
-        clearTargetTimeout();
-        const currentSession = sessionIdxRef.current;
-        
-        const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
-        const radius = getScaledRadius(benchmarkConfig.targetRadius, difficulty, elapsedSec, BENCHMARK_DURATION);
-        const next = createStaticTarget(
-            dimensionsRef.current.width,
-            dimensionsRef.current.height,
-            radius
-        );
-        activeTargetId.current = next.id;
-        setTarget(next);
-        setTotalTargetsSpawned(p => p + 1);
-
-        timeoutRef.current = window.setTimeout(() => {
-            if (sessionIdxRef.current !== currentSession) return;
-            setMisses(p => p + 1);
-            setMissedByTimeout(p => p + 1);
-            setScore(p => Math.max(0, p - benchmarkConfig.missPenalty));
+    // Spawn first target when engine transitions to "live"
+    const prevPhaseRef = useRef(engine.phase);
+    useEffect(() => {
+        if (engine.phase === "live" && prevPhaseRef.current !== "live") {
+            sessionStartRef.current = performance.now();
             spawnTarget();
-        }, benchmarkConfig.targetLifetimeMs);
-    };
+        }
+        prevPhaseRef.current = engine.phase;
+    }, [engine.phase, spawnTarget]);
 
-    const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (phase !== "ACTIVE" || !target) return;
+    useEffect(() => {
+        if (engine.phase === "finished") {
+            setCalculating(true);
+            const t = setTimeout(() => {
+                setCalculating(false);
+            }, 800);
+            return () => clearTimeout(t);
+        }
+    }, [engine.phase]);
+
+    const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+        if (engine.phase !== "live" || !target || engine.countdown !== null) return;
         if (target.id !== activeTargetId.current) return;
-        const canvas = canvasRef.current;
+
+        const now = performance.now();
+        if (now - lastClickTimeRef.current < 80) return;
+        lastClickTimeRef.current = now;
+
+        const canvas = engine.canvasRef.current;
         if (!canvas) return;
 
-        const { x, y } = getScaledCanvasCoordinates(e, canvas, dimensionsRef.current.width, dimensionsRef.current.height);
+        const { x, y } = getScaledCanvasCoordinates(e, canvas, engine.dimensions.width, engine.dimensions.height);
 
         if (isPointInsideTarget(x, y, target.x, target.y, target.radius)) {
             const reaction = performance.now() - target.spawnedAt;
-            setHits(p => p + 1);
-            setScore(p => p + benchmarkConfig.scorePerHit);
-            setReactionTimes(p => [...p, reaction]);
+            engine.triggerHit(reaction);
+            engine.incrementScore(benchmarkConfig.scorePerHit);
             spawnHitmarker(e.clientX, e.clientY);
             spawnTarget();
         } else {
-            setMisses(p => p + 1);
-            setScore(p => Math.max(0, p - benchmarkConfig.missPenalty));
+            engine.triggerMiss(benchmarkConfig.missPenalty);
         }
     };
 
-    // ─────────────────────────────────────────────────────────
-    //  PHASE 3: Telemetry calculation
-    // ─────────────────────────────────────────────────────────
-    const endSession = async () => {
-        clearTargetTimeout();
-        setTarget(null);
-        setPhase("CALCULATING");
-
-        if (document.fullscreenElement) {
-            await document.exitFullscreen().catch(() => {});
-        }
-
-        window.setTimeout(() => {
-            setHits(h => {
-                setMisses(m => {
-                    setScore(s => {
-                        setReactionTimes(rt => {
-                            setTotalTargetsSpawned(sp => {
-                                setMissedByTimeout(mt => {
-                                    runCalculation(h, m, s, rt, sp, mt);
-                                    return mt;
-                                });
-                                return sp;
-                            });
-                            return rt;
-                        });
-                        return s;
-                    });
-                    return m;
-                });
-                return h;
-            });
-        }, 800);
-    };
-
-    const runCalculation = async (
-        finalHits: number,
-        finalMisses: number,
-        finalScore: number,
-        finalReactionTimes: number[],
-        finalSpawned: number,
-        finalTimeouts: number,
-    ) => {
-        const totalShots  = finalHits + finalMisses;
-        const rawAccuracy = totalShots > 0 ? finalHits / totalShots : 0;
-
-        const penaltyMultiplier = rawAccuracy < ACCURACY_THRESHOLD
-            ? Math.pow(rawAccuracy / ACCURACY_THRESHOLD, 2)
-            : 1;
-        const appliedPenalty = penaltyMultiplier < 1;
-        const benchmarkScore = Math.round((finalHits * 1000) * penaltyMultiplier);
-
-        const resultData = buildGameResult({
-            mode: "flick-benchmark",
-            difficulty: difficultyLabels[difficulty],
-            score: benchmarkScore,
-            hits: finalHits,
-            misses: finalMisses,
-            duration: BENCHMARK_DURATION,
-            reactionTimes: finalReactionTimes,
-            totalTargetsSpawned: finalSpawned,
-            missedByTimeout: finalTimeouts,
-            extraStats: {
-                "Raw Accuracy": `${(rawAccuracy * 100).toFixed(1)}%`,
-                "Penalty Applied": appliedPenalty ? `${((1 - penaltyMultiplier) * 100).toFixed(0)}%` : "None",
-                "Timeouts": finalTimeouts,
-            },
-        });
-
-        const benchmarkResult: GameResult = { ...resultData, isBenchmark: true };
-
-        await updateStatsWithResult(benchmarkResult);
-        setPenaltyApplied(appliedPenalty);
-        setResult(benchmarkResult);
-        setIsFinished(true);
-    };
-
-    const handleRestart = () => {
-        sessionIdxRef.current++; // Invalidate stale timeouts
-        clearTargetTimeout();
-        setPhase("PRE_MENU");
-        setCountdown(3);
-        setTimeLeft(BENCHMARK_DURATION);
-        setTarget(null);
-        setScore(0);
-        setHits(0);
-        setMisses(0);
-        setReactionTimes([]);
-        setTotalTargetsSpawned(0);
-        setMissedByTimeout(0);
-        setResult(null);
-        setIsFinished(false);
-        setPenaltyApplied(false);
-    };
-
-    const handleBackToMenu = () => {
-        clearTargetTimeout();
-        if (onFinish && result) {
-            onFinish(result);
-        } else {
-            handleRestart();
-        }
-    };
-
-    useEffect(() => () => clearTargetTimeout(), []);
-
-    // Difficulty option display config
     const difficultyOptions: { key: Difficulty; label: string; desc: string }[] = [
-        { key: "easy",    label: "ECO",       desc: "Large targets · 1400ms lifetime" },
-        { key: "medium",  label: "BONUS",     desc: "Medium targets · 1100ms lifetime" },
-        { key: "hard",    label: "FORCE BUY", desc: "Small targets · 850ms lifetime" },
-        { key: "extreme", label: "FULL BUY",  desc: "Micro targets · 650ms lifetime" },
+        { key: "easy", label: "ECO", desc: "Large targets · 1400ms lifetime" },
+        { key: "medium", label: "BONUS", desc: "Medium targets · 1100ms lifetime" },
+        { key: "hard", label: "FORCE BUY", desc: "Small targets · 850ms lifetime" },
+        { key: "extreme", label: "FULL BUY", desc: "Micro targets · 650ms lifetime" },
     ];
 
-    // ─────────────────────────────────────────────────────────
-    //  RENDER
-    // ─────────────────────────────────────────────────────────
-    return (
-        <div ref={containerRef} className="relative w-full h-screen flex flex-col bg-[#121212] text-[#EAEAEA] overflow-hidden">
+    const isCountingDown = engine.countdown !== null && engine.countdown > 0;
+    const isLive = engine.phase === "live";
+    const isFinished = engine.phase === "finished" && engine.result !== null && !calculating;
 
-            {/* ── RESULTS SCREEN ── */}
-            {isFinished && result && (
+    return (
+        <div ref={engine.containerRef} className="relative w-full h-screen flex flex-col bg-[#121212] text-[#EAEAEA] overflow-hidden">
+
+            {/* RESULTS SCREEN */}
+            {isFinished && engine.result && (
                 <div className="absolute inset-0 z-[100]">
-                    <ResultsScreen result={result} onRestart={handleRestart} onBackToMenu={handleBackToMenu} />
+                    <ResultsScreen result={engine.result} onRestart={handleInitialize} onBackToMenu={engine.resetToMenu} />
                 </div>
             )}
 
-            {/* ════════════════════════════════════════════════
-                PHASE 0: PRE-GAME MENU
-            ════════════════════════════════════════════════ */}
-            {phase === "PRE_MENU" && !isFinished && (
+            {/* PRE-GAME MENU */}
+            {engine.phase === "menu" && (
                 <>
                     <div className="absolute inset-0 z-0 pointer-events-none opacity-30 bg-[linear-gradient(to_right,#ffffff0a_1px,transparent_1px),linear-gradient(to_bottom,#ffffff0a_1px,transparent_1px)] bg-[size:32px_32px]" />
                     <div className="relative z-10 w-full h-full flex items-center justify-center p-4 bg-black/50">
                         <div className="w-full max-w-2xl space-y-8 text-center p-12 border border-white/10 bg-[#121212]/80 rounded-3xl backdrop-blur-xl shadow-2xl">
-
-                            {/* Header */}
                             <div className="space-y-2">
                                 <p className="text-[#ec4899] text-sm font-bold tracking-[0.35em] uppercase">Evaluation Protocol</p>
                                 <h2 className="text-5xl font-black tracking-widest uppercase text-white">Flick Benchmark</h2>
@@ -369,7 +191,6 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
                                 </p>
                             </div>
 
-                            {/* Difficulty Selector */}
                             <div className="space-y-3">
                                 <span className="text-gray-400 text-xs font-bold tracking-wider uppercase block text-left">Select Difficulty</span>
                                 <div className="grid grid-cols-2 gap-3">
@@ -392,10 +213,9 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
                                 </div>
                             </div>
 
-                            {/* Locked config strip */}
                             <div className="flex gap-3 justify-center">
                                 {[
-                                    { label: "MODE",     value: "Static Flick" },
+                                    { label: "MODE", value: "Static Flick" },
                                     { label: "DURATION", value: "60s · LOCKED" },
                                     { label: "ACCURACY FLOOR", value: "85%" },
                                 ].map(item => (
@@ -406,7 +226,6 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
                                 ))}
                             </div>
 
-                            {/* Initialize button */}
                             <button
                                 onClick={handleInitialize}
                                 className="w-full mt-2 px-12 py-5 bg-[#ec4899] text-white text-lg font-black tracking-[0.2em] rounded-xl hover:bg-white hover:text-[#ec4899] transition-all shadow-[0_0_30px_rgba(236,72,153,0.3)] hover:shadow-[0_0_30px_rgba(236,72,153,0.6)]"
@@ -418,10 +237,8 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
                 </>
             )}
 
-            {/* ════════════════════════════════════════════════
-                PHASE 1: COUNTDOWN
-            ════════════════════════════════════════════════ */}
-            {phase === "COUNTDOWN" && !isFinished && (
+            {/* COUNTDOWN */}
+            {engine.phase === "countdown" && (
                 <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#121212]">
                     <div className="absolute inset-0 opacity-10 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
 
@@ -432,19 +249,19 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
                         <div className="flex flex-col items-center space-y-1">
                             <span className="text-gray-500 text-xs tracking-widest uppercase">Commencing In</span>
                             <span
-                                key={countdown}
+                                key={engine.countdown}
                                 className="text-[10rem] font-black leading-none text-white drop-shadow-[0_0_60px_#ec4899] animate-ping"
                                 style={{ animationDuration: "0.8s", animationIterationCount: 1, animationFillMode: "both" }}
                             >
-                                {countdown}
+                                {engine.countdown}
                             </span>
                         </div>
 
                         <div className="flex gap-4 mt-4">
                             {[
-                                { label: "MODE",        value: "Static Flick" },
-                                { label: "DURATION",    value: "60s" },
-                                { label: "DIFFICULTY",  value: difficultyLabels[difficulty].toUpperCase() },
+                                { label: "MODE", value: "Static Flick" },
+                                { label: "DURATION", value: "60s" },
+                                { label: "DIFFICULTY", value: difficultyLabels[difficulty].toUpperCase() },
                                 { label: "ENVIRONMENT", value: "Dark" },
                             ].map(item => (
                                 <div key={item.label} className="flex flex-col items-center px-5 py-3 border border-[#ec4899]/20 bg-[#ec4899]/5 rounded-xl">
@@ -462,40 +279,34 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
                 </div>
             )}
 
-            {/* ════════════════════════════════════════════════
-                PHASE 2: ACTIVE GAME
-            ════════════════════════════════════════════════ */}
-            {phase === "ACTIVE" && !isFinished && (
+            {/* ACTIVE GAME */}
+            {isLive && (
                 <div className="relative flex flex-col w-full h-full z-20">
-
-                    {/* HUD */}
                     <div className="relative z-30 shrink-0 w-full bg-[#050505]/90 border-b border-white/10 backdrop-blur-sm">
                         <SessionHUD
                             data={{
                                 mode: "Flick Benchmark",
                                 difficulty: difficultyLabels[difficulty],
-                                timeLeft,
-                                score,
-                                hits,
-                                misses,
+                                timeLeft: engine.timeLeft,
+                                score: engine.score,
+                                hits: engine.hits,
+                                misses: engine.misses,
                                 accuracy,
                                 averageReactionTime,
                                 bestReactionTime,
                                 extraLines: [
-                                    { label: "Spawned",  value: totalTargetsSpawned },
-                                    { label: "Timeouts", value: missedByTimeout },
+                                    { label: "Spawned", value: engine.totalTargetsSpawned },
+                                    { label: "Timeouts", value: engine.missedByTimeout },
                                 ],
                             }}
                         />
                     </div>
 
-                    {/* Official Benchmark banner */}
                     <div className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-1 bg-[#ec4899]/10 border border-[#ec4899]/30 rounded-full pointer-events-none">
                         <div className="w-1.5 h-1.5 rounded-full bg-[#ec4899] shadow-[0_0_6px_#ec4899] animate-pulse" />
                         <span className="text-[#ec4899] text-[9px] font-black tracking-[0.35em] uppercase">Official Benchmark · All Settings Locked</span>
                     </div>
 
-                    {/* 3D Arena — same dark-slate look as StaticFlick */}
                     <div className="relative flex-1 w-full overflow-hidden">
                         <div className="absolute inset-0 z-0 overflow-hidden bg-[#2f3b4c] perspective-[800px]">
                             <div className="absolute top-[-50%] left-[-50%] w-[200%] h-[200%] bg-[#334155] bg-[linear-gradient(to_right,#00000033_2px,transparent_2px),linear-gradient(to_bottom,#00000033_2px,transparent_2px)] bg-[size:4rem_4rem] origin-center [transform:rotateX(60deg)]" />
@@ -504,10 +315,10 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
 
                         <div className="relative z-10 w-full h-full">
                             <canvas
-                                ref={canvasRef}
-                                width={renderDimensions.width}
-                                height={renderDimensions.height}
-                                onClick={handleCanvasClick}
+                                ref={engine.canvasRef}
+                                width={engine.dimensions.width}
+                                height={engine.dimensions.height}
+                                onMouseDown={handleCanvasMouseDown}
                                 className="absolute inset-0 block cursor-crosshair"
                             />
                         </div>
@@ -515,10 +326,8 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
                 </div>
             )}
 
-            {/* ════════════════════════════════════════════════
-                PHASE 3: CALCULATING
-            ════════════════════════════════════════════════ */}
-            {phase === "CALCULATING" && !isFinished && (
+            {/* CALCULATING TELEMETRY */}
+            {calculating && (
                 <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#121212]/95 backdrop-blur-sm">
                     <div className="text-center space-y-8">
                         <div className="relative w-24 h-24 mx-auto">

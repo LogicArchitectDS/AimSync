@@ -20,6 +20,7 @@ async function getDb(): Promise<any> {
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
+    const history = searchParams.get('history') === 'true';
 
     if (!userId) {
         return NextResponse.json({ error: 'Missing userId parameter' }, { status: 400 });
@@ -33,6 +34,14 @@ export async function GET(request: Request) {
     }
 
     try {
+        if (history) {
+            const result = await db
+                .prepare('SELECT accuracy FROM scores_telemetry WHERE user_id = ? ORDER BY created_at DESC LIMIT 20')
+                .bind(userId)
+                .all();
+            return NextResponse.json(result.results || []);
+        }
+
         const result = await db
             .prepare('SELECT * FROM player_stats WHERE user_id = ?')
             .bind(userId)

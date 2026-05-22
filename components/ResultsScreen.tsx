@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useGameStore } from "@/store/gameStore";
 import { useRouter } from "next/navigation";
-import type { GameResult } from "@/lib/game/types";
+import type { GameResult, Difficulty } from "@/lib/game/types";
 import { getModeConfig } from "@/lib/config/modeRegistry";
+import { RoutineDirector } from "@/lib/services/routineDirector";
 
 interface ResultsScreenProps {
     exerciseId?: string;
@@ -33,6 +34,9 @@ export default function ResultsScreen({
     const router = useRouter();
     const storeReset = useGameStore(state => state.reset);
     const storeStartGame = useGameStore(state => state.startGame);
+
+    const [dailyState, setDailyState] = useState(() => RoutineDirector.getContractState());
+    const [isContractActive, setIsContractActive] = useState(() => RoutineDirector.isContractActive());
 
     // 1. State Management: isSyncing defaults to true to cleanly intercept page lifecycles
     const [isSyncing, setIsSyncing] = useState(true);
@@ -115,6 +119,49 @@ export default function ResultsScreen({
 
         transmitTelemetry();
     }, [currentMode, hits, misses, maxCombo, durationSeconds]);
+
+    const handleNextContractDrill = () => {
+        if (dailyState) {
+            const dirDiff = dailyState.drills[dailyState.currentStepIndex]?.difficulty || "medium";
+            let mappedDiff: Difficulty = "bonus";
+            if (dirDiff === "easy") mappedDiff = "eco";
+            else if (dirDiff === "medium") mappedDiff = "bonus";
+            else if (dirDiff === "hard") mappedDiff = "force-buy";
+            else if (dirDiff === "extreme") mappedDiff = "full-buy";
+
+            const calculatedAccuracy = hits + misses > 0 ? Math.round((hits / (hits + misses)) * 100) : 0;
+            const rxTimes = result?.reactionTimes || [];
+            const avgRx = rxTimes.length > 0 ? rxTimes.reduce((a, b) => a + b, 0) / rxTimes.length : 0;
+            const bestRx = rxTimes.length > 0 ? Math.min(...rxTimes) : 0;
+
+            const gameResultPayload: GameResult = {
+                id: `result-${Date.now()}`,
+                modeId: currentMode,
+                score: displayScore,
+                hits,
+                misses,
+                accuracy: calculatedAccuracy,
+                reactionTimes: rxTimes,
+                averageReactionTime: avgRx,
+                bestReactionTime: bestRx,
+                createdAt: new Date().toISOString(),
+                difficulty: mappedDiff,
+                durationSeconds: durationSeconds,
+                extraStats: { "Max Combo": maxCombo }
+            };
+            const updated = RoutineDirector.completeDrill(gameResultPayload);
+            if (updated) {
+                if (updated.status === "completed") {
+                    router.push("/dashboard");
+                } else {
+                    const nextDrill = updated.drills[updated.currentStepIndex];
+                    router.push(`/game?mode=${nextDrill.modeId}&diff=${nextDrill.difficulty}&time=${nextDrill.durationSeconds}&autoStart=true`);
+                }
+            } else {
+                router.push("/dashboard");
+            }
+        }
+    };
 
     const handleReturnToHub = async () => {
         if (onBackToDashboard) {
@@ -231,20 +278,36 @@ export default function ResultsScreen({
                     </div>
                 )}
 
-                <div className="flex flex-col sm:flex-row gap-4 w-full justify-center relative z-10">
-                    <button
-                        onClick={handlePlayAgain}
-                        className="px-10 py-5 bg-[#EAEAEA] text-[#121212] font-black tracking-[0.2em] uppercase rounded-xl hover:bg-[#3366FF] hover:text-white transition-all duration-300 w-full sm:w-auto"
-                    >
-                        Run Again
-                    </button>
-                    <button
-                        onClick={handleReturnToHub}
-                        className="px-10 py-5 bg-transparent border border-white/20 text-white font-bold tracking-[0.2em] uppercase rounded-xl hover:bg-white/10 hover:border-white/50 transition-all duration-300 w-full sm:w-auto"
-                    >
-                        Abort to Hub
-                    </button>
-                </div>
+                {isContractActive && dailyState && dailyState.drills[dailyState.currentStepIndex] && dailyState.drills[dailyState.currentStepIndex].modeId === currentMode ? (
+                    <div className="flex flex-col gap-4 w-full items-center justify-center relative z-10">
+                        <button
+                            onClick={handleNextContractDrill}
+                            className="px-12 py-6 bg-gradient-to-r from-[#3366FF] to-cyan-500 text-white font-black tracking-[0.25em] text-lg uppercase rounded-2xl hover:brightness-110 active:scale-[0.98] transition-all duration-300 shadow-[0_0_30px_rgba(51,102,255,0.45)] w-full max-w-md animate-pulse"
+                        >
+                            {dailyState.currentStepIndex === dailyState.drills.length - 1
+                                ? "Complete Daily Contract"
+                                : `Next Drill: ${getModeConfig(dailyState.drills[dailyState.currentStepIndex + 1]?.modeId || "")?.name || "Next"}`}
+                        </button>
+                        <p className="text-slate-500 text-[10px] font-bold tracking-[0.2em] uppercase mt-2">
+                            Daily Contract Active &bull; Step {dailyState.currentStepIndex + 1} of {dailyState.drills.length}
+                        </p>
+                    </div>
+                ) : (
+                    <div className="flex flex-col sm:flex-row gap-4 w-full justify-center relative z-10">
+                        <button
+                            onClick={handlePlayAgain}
+                            className="px-10 py-5 bg-[#EAEAEA] text-[#121212] font-black tracking-[0.2em] uppercase rounded-xl hover:bg-[#3366FF] hover:text-white transition-all duration-300 w-full sm:w-auto"
+                        >
+                            Run Again
+                        </button>
+                        <button
+                            onClick={handleReturnToHub}
+                            className="px-10 py-5 bg-transparent border border-white/20 text-white font-bold tracking-[0.2em] uppercase rounded-xl hover:bg-white/10 hover:border-white/50 transition-all duration-300 w-full sm:w-auto"
+                        >
+                            Abort to Hub
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );

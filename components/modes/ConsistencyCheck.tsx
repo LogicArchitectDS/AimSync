@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GameResult, MovingTarget } from "@/lib/game/types";
 import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
 import {
@@ -11,16 +11,10 @@ import {
     isPointInsideTarget,
 } from "@/lib/utils/gameMath";
 import { createTrackingTarget, updateTrackingTargetPosition } from "@/lib/utils/targetSpawning";
-import { buildGameResult } from "@/lib/utils/resultBuilder";
-import { updateStatsWithResult } from "@/lib/utils/statsStorage";
+import { useBaseGameEngine } from "@/lib/hooks/useBaseGameEngine";
+
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
-
-// ─────────────────────────────────────────────────────────────
-//  ConsistencyCheck — Endurance tracking variant.
-//  Same canvas engine as TrackingMode, locked to 180s.
-//  Post-session: calculates a Stability Score via Coefficient of Variation.
-// ─────────────────────────────────────────────────────────────
 
 const ENDURANCE_DURATION = 180; // 3 minutes, locked
 
@@ -30,64 +24,32 @@ interface OverrideSettings { difficulty: Difficulty; duration: number; }
 interface ConsistencyCheckProps { overrideSettings?: OverrideSettings; onFinish?: (res: GameResult) => void; }
 
 export default function ConsistencyCheck({ overrideSettings, onFinish }: ConsistencyCheckProps = {}) {
-    const containerRef       = useRef<HTMLDivElement | null>(null);
-    const canvasRef          = useRef<HTMLCanvasElement | null>(null);
-    const animationFrameRef  = useRef<number | null>(null);
-    const timeoutRef         = useRef<number | null>(null);
-    const isMountedRef       = useRef(true);
-    const sessionIdxRef      = useRef(0);
-    const sessionStartRef    = useRef<number>(0);
-    const targetRef          = useRef<TrueTrackingTarget | null>(null);
-    const mouseRef           = useRef({ isFiring: false, x: 0, y: 0 });
-    const dimensionsRef      = useRef({ width: 1600, height: 900 });
-    const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const targetRef = useRef<TrueTrackingTarget | null>(null);
+    const mouseRef = useRef({ x: 0, y: 0 });
 
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
-    const effectiveDifficulty         = overrideSettings?.difficulty ?? difficulty;
-    const effectiveDuration           = overrideSettings?.duration   ?? ENDURANCE_DURATION;
+    const effectiveDifficulty = overrideSettings?.difficulty ?? difficulty;
 
-    const [gameStarted, setGameStarted] = useState(false);
-    const [isFinished,  setIsFinished]  = useState(false);
-    const [timeLeft,    setTimeLeft]    = useState(effectiveDuration);
-    const [countdown,   setCountdown]   = useState<number | null>(null);
-
-    const [score,               setScore]               = useState(0);
-    const [hits,                setHits]                = useState(0);
-    const [misses,              setMisses]              = useState(0);
-    const [reactionTimes,       setReactionTimes]       = useState<number[]>([]);
-    const [totalTargetsSpawned, setTotalTargetsSpawned] = useState(0);
-    const [missedByTimeout,     setMissedByTimeout]     = useState(0);
-    const [result,              setResult]              = useState<GameResult | null>(null);
+    const engine = useBaseGameEngine({
+        modeId: "consistency-check",
+        overrideSettings: {
+            difficulty: effectiveDifficulty,
+            duration: overrideSettings?.duration ?? ENDURANCE_DURATION,
+        },
+        onSessionComplete: onFinish,
+    });
 
     const config = difficultyConfig[effectiveDifficulty];
+    const accuracy = calculateAccuracy(engine.hits, engine.misses);
+    const averageReactionTime = calculateAverageReactionTime(engine.reactionTimes);
+    const bestReactionTime = calculateBestReactionTime(engine.reactionTimes);
 
-    const accuracy            = useMemo(() => calculateAccuracy(hits, misses),             [hits, misses]);
-    const averageReactionTime = useMemo(() => calculateAverageReactionTime(reactionTimes), [reactionTimes]);
-    const bestReactionTime    = useMemo(() => calculateBestReactionTime(reactionTimes),    [reactionTimes]);
-
-    // ─────────────────────────────────────────────────────────
-    //  Engine helpers
-    // ─────────────────────────────────────────────────────────
-    const clearAnimation = () => {
-        if (animationFrameRef.current !== null) {
-            cancelAnimationFrame(animationFrameRef.current);
-            animationFrameRef.current = null;
-        }
-    };
-
-    const clearTargetTimeout = () => {
-        if (timeoutRef.current !== null) {
-            window.clearTimeout(timeoutRef.current);
-            timeoutRef.current = null;
-        }
-    };
-
-    const startTrackingLoop = () => {
-        clearAnimation();
+    const startTrackingLoop = useCallback(() => {
         let lastTime = performance.now();
 
         const tick = (currentTime: number) => {
-            if (!isMountedRef.current) return;
+            if (!engine.isMountedRef.current || engine.phase !== "live") return;
             const deltaTime = currentTime - lastTime;
             lastTime = currentTime;
 
@@ -97,27 +59,30 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
             if (canvas && ctx && targetRef.current) {
                 const nextTarget = updateTrackingTargetPosition(
                     targetRef.current,
-                    dimensionsRef.current.width,
-                    dimensionsRef.current.height
+                    engine.dimensions.width,
+                    engine.dimensions.height
                 );
 
                 const { x, y } = mouseRef.current;
                 const isHit = isPointInsideTarget(x, y, nextTarget.x, nextTarget.y, nextTarget.radius);
 
                 let newHealth = targetRef.current.health;
-                if (isHit) newHealth -= deltaTime * 0.25;
+                if (isHit) {
+                    newHealth -= deltaTime * 0.25;
+                }
 
                 if (newHealth <= 0) {
+                    const trackingDuration = performance.now() - targetRef.current.spawnedAt;
                     targetRef.current = null;
-                    setHits(h => h + 1);
-                    setScore(s => s + config.scorePerHit + 50);
+                    engine.incrementScore(config.scorePerHit + 50);
+                    engine.triggerHit(trackingDuration);
                     spawnTarget();
                     return;
                 }
 
                 targetRef.current = { ...nextTarget, health: newHealth, isBeingTracked: isHit } as TrueTrackingTarget;
 
-                ctx.clearRect(0, 0, dimensionsRef.current.width, dimensionsRef.current.height);
+                ctx.clearRect(0, 0, engine.dimensions.width, engine.dimensions.height);
                 const t = targetRef.current;
 
                 // Purple-tinted target for ConsistencyCheck identity
@@ -139,218 +104,86 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
                 ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
                 ctx.fillStyle = gradient;
                 ctx.shadowColor = t.isBeingTracked ? "rgba(167,139,250,0.8)" : "rgba(0,0,0,0.6)";
-                ctx.shadowBlur  = 25;
+                ctx.shadowBlur = 25;
                 ctx.shadowOffsetY = 20;
                 ctx.fill();
-                ctx.shadowColor   = "transparent";
-                ctx.shadowBlur    = 0;
+                ctx.shadowColor = "transparent";
+                ctx.shadowBlur = 0;
                 ctx.shadowOffsetY = 0;
             }
 
-            animationFrameRef.current = requestAnimationFrame(tick);
+            engine.addAnimationFrame(tick);
         };
 
-        animationFrameRef.current = requestAnimationFrame(tick);
-    };
+        engine.addAnimationFrame(tick);
+    }, [config, engine]);
 
-    const spawnTarget = () => {
-        clearTargetTimeout();
-        clearAnimation();
-        const currentSession = sessionIdxRef.current;
-        const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
-        const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, effectiveDuration);
+    const spawnTarget = useCallback(() => {
+        engine.clearAllTimersAndLoops();
+        const currentSession = engine.sessionIdxRef.current;
+        const elapsedSec = (performance.now() - engine.dimensionsRef.current.width) / 1000; // placeholder
+        const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, engine.duration);
 
         const baseTarget = createTrackingTarget(
             effectiveDifficulty,
-            dimensionsRef.current.width,
-            dimensionsRef.current.height,
+            engine.dimensions.width,
+            engine.dimensions.height,
             radius
         );
 
         targetRef.current = { ...baseTarget, health: 100, isBeingTracked: false };
-        setTotalTargetsSpawned(p => p + 1);
+        engine.incrementSpawned();
         startTrackingLoop();
 
-        timeoutRef.current = window.setTimeout(() => {
-            if (!isMountedRef.current || sessionIdxRef.current !== currentSession) return;
-            setMisses(p => p + 1);
-            setMissedByTimeout(p => p + 1);
-            setScore(p => Math.max(0, p - config.missPenalty));
+        engine.addTimeout(() => {
+            if (!engine.isMountedRef.current || engine.sessionIdxRef.current !== currentSession) return;
+            engine.incrementTimeoutMiss(config.missPenalty);
             spawnTarget();
         }, config.targetLifetimeMs + 1000);
-    };
+    }, [config, effectiveDifficulty, engine, startTrackingLoop]);
 
-    const resetState = () => {
-        sessionIdxRef.current++;
-        clearAnimation();
-        clearTargetTimeout();
-        setGameStarted(false);
-        setIsFinished(false);
-        setTimeLeft(effectiveDuration);
-        setCountdown(null);
+    const handleStartGame = async () => {
         targetRef.current = null;
-        mouseRef.current = { isFiring: false, x: 0, y: 0 };
-        setScore(0);
-        setHits(0);
-        setMisses(0);
-        setReactionTimes([]);
-        setTotalTargetsSpawned(0);
-        setMissedByTimeout(0);
-        setResult(null);
+        engine.beginSession();
     };
 
-    const startGame = async () => {
-        resetState();
-        setGameStarted(true);
-        if (containerRef.current && !document.fullscreenElement) {
-            await containerRef.current.requestFullscreen().catch(() => {});
-        }
-        setCountdown(5); // 5-second prep countdown
-    };
-
-    // ─────────────────────────────────────────────────────────
-    //  Stability Score (Coefficient of Variation)
-    // ─────────────────────────────────────────────────────────
-    const computeStability = (times: number[]): { score: number; label: string } => {
-        if (times.length < 10) return { score: 0, label: "Insufficient Data" };
-
-        const mean       = times.reduce((a, b) => a + b, 0) / times.length;
-        const variance   = times.reduce((a, t) => a + Math.pow(t - mean, 2), 0) / times.length;
-        const stdDev     = Math.sqrt(variance);
-        const cv         = stdDev / mean;
-        const stability  = Math.max(0, Math.round(100 - cv * 200));
-
-        let label = "Severe Variance / Fatigue Failure";
-        if (stability > 90)      label = "Robotic Precision";
-        else if (stability > 75) label = "Highly Stable";
-        else if (stability > 50) label = "Moderate Fatigue Detected";
-
-        return { score: stability, label };
-    };
-
-    const latestStateRef = useRef({ score, hits, misses, reactionTimes, totalTargetsSpawned, missedByTimeout });
-    latestStateRef.current = { score, hits, misses, reactionTimes, totalTargetsSpawned, missedByTimeout };
-
-    const endSession = async () => {
-        clearAnimation();
-        clearTargetTimeout();
-        setGameStarted(false);
-        targetRef.current = null;
-
-        if (document.fullscreenElement) {
-            await document.exitFullscreen().catch(() => {});
-        }
-
-        const { score: s, hits: h, misses: m, reactionTimes: rt, totalTargetsSpawned: sp, missedByTimeout: mt } = latestStateRef.current;
-        const { score: stabilityScore, label: stabilityLabel } = computeStability(rt);
-
-        const resultData = buildGameResult({
-            mode: "consistency-check",
-            difficulty: difficultyLabels[effectiveDifficulty],
-            score: s,
-            hits: h,
-            misses: m,
-            duration: effectiveDuration,
-            reactionTimes: rt,
-            totalTargetsSpawned: sp,
-            missedByTimeout: mt,
-            extraStats: {
-                "Stability Score": `${stabilityScore}%`,
-                "Assessment":      stabilityLabel,
-                "Std Dev Track":   `${Math.round(rt.length > 0 ? Math.sqrt(rt.reduce((a, t) => a + Math.pow(t - rt.reduce((x, y) => x + y, 0) / rt.length, 2), 0) / rt.length) : 0)}ms`,
-            },
-        });
-
-        await updateStatsWithResult(resultData);
-
-        if (onFinish) {
-            onFinish(resultData);
-        } else {
-            setResult(resultData);
-            setIsFinished(true);
-        }
-    };
-
-    // ─────────────────────────────────────────────────────────
-    //  Effects
-    // ─────────────────────────────────────────────────────────
+    // Spawn first target when engine transitions to "live"
+    const prevPhaseRef = useRef(engine.phase);
     useEffect(() => {
-        if (countdown === null) return;
-        if (countdown === 0) {
-            setCountdown(null);
-            sessionStartRef.current = performance.now();
+        if (engine.phase === "live" && prevPhaseRef.current !== "live") {
             spawnTarget();
-            return;
         }
-        const t = window.setTimeout(() => {
-            if (isMountedRef.current) setCountdown(c => (c !== null ? c - 1 : null));
-        }, 1000);
-        return () => window.clearTimeout(t);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [countdown]);
+        prevPhaseRef.current = engine.phase;
+    }, [engine.phase, spawnTarget]);
 
+    // Attach to engine canvasRef
     useEffect(() => {
-        if (!gameStarted) return;
-        const updateSize = () => {
-            if (canvasRef.current?.parentElement) {
-                const { clientWidth, clientHeight } = canvasRef.current.parentElement;
-                dimensionsRef.current = { width: clientWidth, height: clientHeight };
-                setRenderDimensions({ width: clientWidth, height: clientHeight });
-            }
-        };
-        window.addEventListener("resize", updateSize);
-        updateSize();
-        return () => window.removeEventListener("resize", updateSize);
-    }, [gameStarted]);
-
-    useEffect(() => { setTimeLeft(effectiveDuration); }, [effectiveDuration]);
-
-    useEffect(() => {
-        if (!gameStarted || countdown !== null) return;
-        const t = window.setInterval(() => {
-            if (isMountedRef.current) setTimeLeft(p => Math.max(0, p - 1));
-        }, 1000);
-        return () => window.clearInterval(t);
-    }, [gameStarted, countdown]);
-
-    useEffect(() => {
-        if (gameStarted && timeLeft === 0 && !isFinished && countdown === null) endSession();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [timeLeft, gameStarted, isFinished, countdown]);
-
-    useEffect(() => {
-        isMountedRef.current = true;
-        return () => { 
-            isMountedRef.current = false;
-            clearAnimation(); 
-            clearTargetTimeout(); 
-        }; 
-    }, []);
+        engine.canvasRef.current = canvasRef.current;
+    }, [engine]);
 
     const updateMousePosition = (event: React.MouseEvent<HTMLCanvasElement>) => {
         if (!canvasRef.current) return;
-        const { x, y } = getScaledCanvasCoordinates(event, canvasRef.current, dimensionsRef.current.width, dimensionsRef.current.height);
+        const { x, y } = getScaledCanvasCoordinates(event, canvasRef.current, engine.dimensions.width, engine.dimensions.height);
         mouseRef.current.x = x;
         mouseRef.current.y = y;
     };
 
-    const isCountingDown = countdown !== null && countdown > 0;
+    const isCountingDown = engine.countdown !== null && engine.countdown > 0;
+    const isLive = engine.phase === "live";
+    const isFinished = engine.phase === "finished" && engine.result !== null;
 
-    // ─────────────────────────────────────────────────────────
-    //  RENDER
-    // ─────────────────────────────────────────────────────────
     return (
-        <div ref={containerRef} className="relative w-full h-screen flex flex-col bg-[#121212] text-[#EAEAEA] overflow-hidden">
+        <div ref={engine.containerRef} className="relative w-full h-screen flex flex-col bg-[#121212] text-[#EAEAEA] overflow-hidden">
 
-            {/* ── RESULTS SCREEN ── */}
-            {isFinished && result && (
+            {/* RESULTS SCREEN */}
+            {isFinished && engine.result && (
                 <div className="absolute inset-0 z-[100]">
-                    <ResultsScreen result={result} onRestart={startGame} onBackToMenu={resetState} />
+                    <ResultsScreen result={engine.result} onRestart={handleStartGame} onBackToMenu={engine.resetToMenu} />
                 </div>
             )}
 
-            {/* ── PRE-GAME MENU ── */}
-            {!gameStarted && !isFinished && (
+            {/* PRE-GAME MENU */}
+            {engine.phase === "menu" && (
                 <>
                     <div className="absolute inset-0 z-0 pointer-events-none opacity-30 bg-[linear-gradient(to_right,#ffffff0a_1px,transparent_1px),linear-gradient(to_bottom,#ffffff0a_1px,transparent_1px)] bg-[size:32px_32px]" />
                     <div className="relative z-10 w-full h-full flex items-center justify-center p-4 bg-black/50">
@@ -365,7 +198,6 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
                                 </p>
                             </div>
 
-                            {/* Difficulty selector */}
                             {!overrideSettings && (
                                 <div className="flex flex-col text-left">
                                     <span className="text-gray-400 text-xs font-bold tracking-wider mb-2">DIFFICULTY</span>
@@ -381,12 +213,11 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
                                 </div>
                             )}
 
-                            {/* Locked info strip */}
                             <div className="flex gap-3 justify-center">
                                 {[
-                                    { label: "FORMAT",          value: "Tracking" },
-                                    { label: "DURATION",        value: "3 MIN · LOCKED" },
-                                    { label: "ANALYSIS",        value: "Stability CV" },
+                                    { label: "FORMAT", value: "Tracking" },
+                                    { label: "DURATION", value: "3 MIN · LOCKED" },
+                                    { label: "ANALYSIS", value: "Stability CV" },
                                 ].map(item => (
                                     <div key={item.label} className="flex flex-col items-center px-4 py-2 border border-[#8b5cf6]/20 bg-[#8b5cf6]/5 rounded-xl flex-1">
                                         <span className="text-[#8b5cf6] text-[9px] font-black tracking-widest uppercase mb-1">{item.label}</span>
@@ -396,7 +227,7 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
                             </div>
 
                             <button
-                                onClick={startGame}
+                                onClick={handleStartGame}
                                 className="w-full px-12 py-5 bg-[#8b5cf6] text-white text-lg font-black tracking-[0.2em] rounded-xl hover:bg-white hover:text-[#8b5cf6] transition-all shadow-[0_0_30px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(139,92,246,0.6)]"
                             >
                                 INITIATE ENDURANCE SEQUENCE
@@ -406,35 +237,33 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
                 </>
             )}
 
-            {/* ── ACTIVE GAME ── */}
-            {gameStarted && (
+            {/* ACTIVE GAME */}
+            {(isLive || isCountingDown) && (
                 <div className="relative flex flex-col w-full h-full z-20">
-
-                    {/* HUD */}
+                    {/* TOP HUD */}
                     <div className="relative z-30 shrink-0 w-full bg-[#050505]/90 border-b border-white/10 backdrop-blur-sm">
                         <SessionHUD
                             data={{
                                 mode: "Consistency Check",
                                 difficulty: difficultyLabels[effectiveDifficulty],
-                                timeLeft,
-                                score,
-                                hits,
-                                misses,
+                                timeLeft: engine.timeLeft,
+                                score: engine.score,
+                                hits: engine.hits,
+                                misses: engine.misses,
                                 accuracy,
                                 averageReactionTime,
                                 bestReactionTime,
-                                extraLines: [{ label: "Timeouts", value: missedByTimeout }],
+                                extraLines: [{ label: "Timeouts", value: engine.missedByTimeout }],
                             }}
                         />
                     </div>
 
-                    {/* Endurance protocol banner */}
                     <div className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-1 bg-[#8b5cf6]/10 border border-[#8b5cf6]/30 rounded-full pointer-events-none">
                         <div className="w-1.5 h-1.5 rounded-full bg-[#8b5cf6] shadow-[0_0_6px_#8b5cf6] animate-pulse" />
                         <span className="text-[#8b5cf6] text-[9px] font-black tracking-[0.35em] uppercase">Endurance Protocol · Stability Being Measured</span>
                     </div>
 
-                    {/* 3D Arena */}
+                    {/* ARENA */}
                     <div className="relative flex-1 w-full overflow-hidden">
                         <div className="absolute inset-0 z-0 overflow-hidden bg-[#2f3b4c] perspective-[800px]">
                             <div className="absolute top-[-50%] left-[-50%] w-[200%] h-[200%] bg-[#334155] bg-[linear-gradient(to_right,#00000033_2px,transparent_2px),linear-gradient(to_bottom,#00000033_2px,transparent_2px)] bg-[size:4rem_4rem] origin-center [transform:rotateX(60deg)]" />
@@ -444,25 +273,22 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
                         <div className="relative z-10 w-full h-full">
                             <canvas
                                 ref={canvasRef}
-                                width={renderDimensions.width}
-                                height={renderDimensions.height}
-                                onMouseDown={updateMousePosition}
-                                onMouseUp={updateMousePosition}
+                                width={engine.dimensions.width}
+                                height={engine.dimensions.height}
                                 onMouseMove={updateMousePosition}
-                                onMouseLeave={updateMousePosition}
                                 className="absolute inset-0 block cursor-crosshair"
                             />
                         </div>
 
-                        {/* Countdown overlay */}
+                        {/* COUNTDOWN OVERLAY */}
                         {isCountingDown && (
-                            <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
-                                <span
-                                    key={countdown}
-                                    className="text-[12rem] font-black text-[#8b5cf6] animate-ping leading-none select-none drop-shadow-[0_0_60px_#8b5cf6]"
-                                >
-                                    {countdown}
-                                </span>
+                            <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none bg-black/40">
+                                <div className="flex flex-col items-center gap-4">
+                                    <span key={engine.countdown} className="text-[12rem] font-black text-[#8b5cf6] leading-none select-none drop-shadow-[0_0_60px_#8b5cf6]">
+                                        {engine.countdown}
+                                    </span>
+                                    <p className="text-white/50 text-sm font-bold tracking-[0.3em] uppercase">Get Ready</p>
+                                </div>
                             </div>
                         )}
                     </div>

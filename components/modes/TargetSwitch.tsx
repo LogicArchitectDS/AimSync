@@ -30,6 +30,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
     const sessionIdxRef = useRef(0);
     const sessionStartRef = useRef<number>(0);
     const activeTargetId = useRef<string | null>(null);
+    const lastClickTimeRef = useRef<number>(0);
 
     const dimensionsRef = useRef({ width: 1600, height: 900 });
     const [renderDimensions, setRenderDimensions] = useState({ width: 1600, height: 900 });
@@ -99,6 +100,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
     const resetState = () => {
         sessionIdxRef.current++;
         clearTargetTimeout();
+        lastClickTimeRef.current = 0;
         setGameStarted(false);
         setIsFinished(false);
         setTimeLeft(durationSeconds);
@@ -241,8 +243,13 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
 
     const isCountingDown = countdown !== null && countdown > 0;
 
-    const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement, MouseEvent>) => {
+    const handleCanvasMouseDown = (event: React.MouseEvent<HTMLCanvasElement, MouseEvent>) => {
         if (!gameStarted || isCountingDown) return;
+
+        const now = performance.now();
+        if (now - lastClickTimeRef.current < 80) return;
+        lastClickTimeRef.current = now;
+
         const canvas = canvasRef.current;
         if (!canvas) return;
 
@@ -364,7 +371,7 @@ export default function TargetSwitch({ overrideSettings, onFinish }: TargetSwitc
                                 ref={canvasRef}
                                 width={renderDimensions.width}
                                 height={renderDimensions.height}
-                                onClick={handleCanvasClick}
+                                onMouseDown={handleCanvasMouseDown}
                                 className="absolute inset-0 block cursor-crosshair"
                             />
                             

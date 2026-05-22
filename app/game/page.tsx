@@ -143,6 +143,7 @@ function GameEngine() {
 
             {/* The Active Mode Component */}
             {React.createElement(ActiveComponent as any, { 
+                key: `${currentMode}-${JSON.stringify(overrideSettings)}`,
                 onFinish: currentMode === "custom-routine" ? handleModeFinish : undefined,
                 overrideSettings 
             })}

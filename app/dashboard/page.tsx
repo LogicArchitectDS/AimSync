@@ -6,6 +6,7 @@ import { StorageEngine } from "@/lib/utils/storage";
 import { useAuth } from "@/lib/contexts/AuthContext";
 import type { UserStats, CustomPlaylist, PlaylistTask } from "@/lib/game/types";
 import dynamic from 'next/dynamic';
+import { RoutineDirector } from "@/lib/services/routineDirector";
 
 const RadarProfiler = dynamic(() => import('@/components/RadarProfiler'), {
     ssr: false,
@@ -30,6 +31,9 @@ export default function DashboardPage() {
     const [playlists, setPlaylists] = useState<CustomPlaylist[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
+    const [dailyContract, setDailyContract] = useState<any>(null);
+    const [isContractActive, setIsContractActive] = useState(false);
+
     // --- MODAL STATE ---
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [newPlaylistName, setNewPlaylistName] = useState("");
@@ -46,10 +50,35 @@ export default function DashboardPage() {
 
     const radarData = stats?.xpFactors || { flickingXp: 0, trackingXp: 0, speedXp: 0, precisionXp: 0, perceptionXp: 0, cognitionXp: 0 };
 
+    const handleInitiateDailyContract = async () => {
+        const started = await RoutineDirector.startContract(user?.id || "local");
+        setDailyContract(started);
+        setIsContractActive(true);
+        const firstDrill = started.drills[0];
+        router.push(`/game?mode=${firstDrill.modeId}&diff=${firstDrill.difficulty}&time=${firstDrill.durationSeconds}&autoStart=true`);
+    };
+
+    const handleContinueDailyContract = () => {
+        if (dailyContract) {
+            const nextDrill = dailyContract.drills[dailyContract.currentStepIndex];
+            router.push(`/game?mode=${nextDrill.modeId}&diff=${nextDrill.difficulty}&time=${nextDrill.durationSeconds}&autoStart=true`);
+        }
+    };
+
+    const handleAbandonDailyContract = () => {
+        if (confirm("Are you sure you want to abandon the current Daily Contract? This will wipe your progression for today.")) {
+            RoutineDirector.abortContract();
+            setDailyContract(null);
+            setIsContractActive(false);
+        }
+    };
+
     useEffect(() => {
         const timer = setTimeout(() => {
             setStats(StorageEngine.getUserStats());
             setPlaylists(StorageEngine.getPlaylists());
+            setDailyContract(RoutineDirector.getContractState());
+            setIsContractActive(RoutineDirector.isContractActive());
             setIsLoading(false);
         }, 0);
         return () => clearTimeout(timer);
@@ -342,6 +371,91 @@ export default function DashboardPage() {
                 {/* RIGHT PANEL */}
                 <div className="lg:col-span-8 flex flex-col gap-6">
 
+                    {/* DAILY CONTRACT PROTOCOL */}
+                    <div className="bg-[#0b0f19]/80 border border-blue-500/25 p-6 rounded-xl backdrop-blur-md relative overflow-hidden shadow-[0_0_30px_rgba(59,130,246,0.15)]">
+                        {/* Glowing accent border */}
+                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-blue-500 via-cyan-400 to-transparent" />
+                        <div className="absolute -top-24 -right-24 w-64 h-64 bg-cyan-500/10 rounded-full blur-[80px] pointer-events-none" />
+
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4 relative z-10">
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <span className="px-2 py-0.5 text-[9px] font-black tracking-widest text-[#00E5FF] bg-[#00E5FF]/10 rounded border border-[#00E5FF]/30 uppercase">DIRECTOR INTELLIGENCE</span>
+                                    {isContractActive && <span className="h-1.5 w-1.5 bg-[#00E5FF] rounded-full animate-ping" />}
+                                </div>
+                                <h2 className="text-white font-black text-xl uppercase tracking-wider mt-1">Daily Training Contract</h2>
+                                <p className="text-slate-400 text-xs mt-0.5">Custom performance-calibrated neurological routine</p>
+                            </div>
+                            
+                            {!isContractActive ? (
+                                <button
+                                    onClick={handleInitiateDailyContract}
+                                    className="px-6 py-3 bg-gradient-to-r from-[#3366FF] to-cyan-500 hover:brightness-110 text-white text-[11px] font-black uppercase tracking-widest rounded-lg transition-all shadow-[0_0_20px_rgba(51,102,255,0.4)]"
+                                >
+                                    Initiate Contract
+                                </button>
+                            ) : (
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={handleAbandonDailyContract}
+                                        className="px-4 py-3 bg-red-950/40 hover:bg-red-900/40 text-red-400 border border-red-500/20 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all"
+                                    >
+                                        Abandon
+                                    </button>
+                                    <button
+                                        onClick={handleContinueDailyContract}
+                                        className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 hover:brightness-110 text-white text-[11px] font-black uppercase tracking-widest rounded-lg transition-all shadow-[0_0_20px_rgba(6,182,212,0.4)]"
+                                    >
+                                        Continue Contract
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Contract status & steps */}
+                        {isContractActive && dailyContract ? (
+                            <div className="mt-4 relative z-10 border-t border-white/5 pt-4">
+                                <div className="flex justify-between items-center mb-3">
+                                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                                        Sequence Progression
+                                    </span>
+                                    <span className="text-xs font-mono text-[#00E5FF] font-black">
+                                        {dailyContract.currentStepIndex} / {dailyContract.drills.length} Completed
+                                    </span>
+                                </div>
+                                <div className="grid grid-cols-5 gap-2">
+                                    {dailyContract.drills.map((drill: any, idx: number) => {
+                                        const isActive = idx === dailyContract.currentStepIndex;
+                                        const isCompleted = idx < dailyContract.currentStepIndex;
+                                        const { getModeConfig } = require("@/lib/config/modeRegistry");
+                                        const drillName = getModeConfig(drill.modeId)?.name || drill.modeId;
+                                        return (
+                                            <div
+                                                key={idx}
+                                                className={`p-2 rounded border text-center transition-all ${
+                                                    isCompleted
+                                                        ? "bg-emerald-500/5 border-emerald-500/30 text-emerald-400"
+                                                        : isActive
+                                                        ? "bg-cyan-500/10 border-cyan-500/60 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.15)]"
+                                                        : "bg-white/5 border-white/5 text-slate-500"
+                                                }`}
+                                            >
+                                                <div className="text-[9px] font-black uppercase tracking-widest truncate">{drillName}</div>
+                                                <div className="text-[8px] font-mono mt-1 opacity-80">
+                                                    {isCompleted ? "✓ DONE" : isActive ? "▶ ACTIVE" : "⚿ LOCKED"}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="mt-2 text-slate-500 text-xs leading-relaxed border-t border-white/5 pt-3">
+                                The director analyzes your performance telemetry history across all cognitive metrics to generate a balanced 5-exercise regimen every day. Initiating locks the console until all 5 routines are completed.
+                            </div>
+                        )}
+                    </div>
+
                     {/* BOX 1: ACTIVE OPERATIONS */}
                     <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md relative overflow-hidden">
                         {/* Background glow effect for the panel */}
@@ -382,8 +496,12 @@ export default function DashboardPage() {
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <button onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}&taskId=${task.id}`)} className={`px-6 py-2 text-[10px] font-black uppercase tracking-widest rounded border transition-all ${isCompleted ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 opacity-100' : 'bg-white/5 hover:bg-blue-600 text-white border-white/10 hover:border-blue-500 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0'}`}>
-                                                    {isCompleted ? "Replay" : "Deploy"}
+                                                <button 
+                                                    disabled={isContractActive}
+                                                    onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}&taskId=${task.id}`)} 
+                                                    className={`px-6 py-2 text-[10px] font-black uppercase tracking-widest rounded border transition-all ${isCompleted ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 opacity-100' : isContractActive ? 'bg-white/5 text-slate-600 border-white/5 cursor-not-allowed opacity-50' : 'bg-white/5 hover:bg-blue-600 text-white border-white/10 hover:border-blue-500 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0'}`}
+                                                >
+                                                    {isCompleted ? "Replay" : isContractActive ? "Locked" : "Deploy"}
                                                 </button>
                                             </div>
                                         </div>
@@ -423,8 +541,12 @@ export default function DashboardPage() {
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <button onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}&taskId=${task.id}`)} className={`px-8 py-3 text-[11px] font-black uppercase tracking-widest rounded border transition-all ${isCompleted ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 opacity-100' : 'bg-red-600/20 hover:bg-red-600 text-white border-red-500/30 hover:border-red-500 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0 shadow-[0_0_15px_rgba(239,68,68,0.2)]'}`}>
-                                                    {isCompleted ? "Replay" : "Deploy"}
+                                                <button 
+                                                    disabled={isContractActive}
+                                                    onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}&taskId=${task.id}`)} 
+                                                    className={`px-8 py-3 text-[11px] font-black uppercase tracking-widest rounded border transition-all ${isCompleted ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 opacity-100' : isContractActive ? 'bg-white/5 text-slate-600 border-white/5 cursor-not-allowed opacity-50 shadow-none' : 'bg-red-600/20 hover:bg-red-600 text-white border-red-500/30 hover:border-red-500 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0 shadow-[0_0_15px_rgba(239,68,68,0.2)]'}`}
+                                                >
+                                                    {isCompleted ? "Replay" : isContractActive ? "Locked" : "Deploy"}
                                                 </button>
                                             </div>
                                         </div>
@@ -441,7 +563,11 @@ export default function DashboardPage() {
                                 <h2 className="text-white font-black text-lg uppercase tracking-widest">Custom Regimens</h2>
                                 <p className="text-slate-400 text-sm">Your personal warmup routines</p>
                             </div>
-                            <button onClick={() => setIsModalOpen(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest rounded transition-colors shadow-[0_0_15px_rgba(59,130,246,0.3)]">
+                            <button 
+                                disabled={isContractActive}
+                                onClick={() => setIsModalOpen(true)} 
+                                className={`px-4 py-2 text-[10px] font-black uppercase tracking-widest rounded transition-colors ${isContractActive ? 'bg-white/5 text-slate-600 cursor-not-allowed shadow-none' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]'}`}
+                            >
                                 + Create Routine
                             </button>
                         </div>
@@ -479,10 +605,11 @@ export default function DashboardPage() {
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                             </button>
                                             <button
+                                                disabled={isContractActive}
                                                 onClick={() => router.push(`/game?playlist=${playlist.id}`)}
-                                                className="px-5 py-2 bg-white/5 hover:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded border border-white/10 hover:border-blue-500 transition-all"
+                                                className={`px-5 py-2 text-[10px] font-black uppercase tracking-widest rounded border transition-all ${isContractActive ? 'bg-white/5 text-slate-600 border-white/5 cursor-not-allowed' : 'bg-white/5 hover:bg-blue-600 text-white border-white/10 hover:border-blue-500'}`}
                                             >
-                                                Deploy
+                                                {isContractActive ? "Locked" : "Deploy"}
                                             </button>
                                         </div>
                                     </div>
@@ -501,7 +628,11 @@ export default function DashboardPage() {
                         </div>
                         <div className="flex flex-col mt-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
                             {trainingProtocols.map((protocol) => (
-                                <div key={protocol.uid} className="grid grid-cols-12 gap-4 py-4 px-4 items-center border-b border-white/5 hover:bg-white/[0.02] transition-colors group cursor-pointer" onClick={() => router.push(`/game?mode=${protocol.mode}&time=0&diff=${protocol.difficulty}`)}>
+                                <div 
+                                    key={protocol.uid} 
+                                    className={`grid grid-cols-12 gap-4 py-4 px-4 items-center border-b border-white/5 transition-colors group ${isContractActive ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/[0.02] cursor-pointer'}`} 
+                                    onClick={isContractActive ? () => alert("Daily Contract Active! Please complete or abandon your current contract to access the sandbox.") : () => router.push(`/game?mode=${protocol.mode}&time=0&diff=${protocol.difficulty}`)}
+                                >
                                     <div className="col-span-3 flex flex-col"><span className="text-white font-bold text-sm tracking-wide group-hover:text-[#3366FF] transition-colors truncate">{protocol.name}</span><span className="text-slate-500 text-[10px] truncate pr-2">{protocol.desc}</span></div>
                                     <div className="col-span-2 flex justify-center"><span className={`px-2 py-1 text-[9px] font-black uppercase tracking-widest border rounded-sm ${protocol.badgeColor}`}>{protocol.category}</span></div>
                                     <div className="col-span-1 flex justify-center"><span className="px-2 py-1 text-[9px] font-mono text-slate-300 bg-white/5 border border-white/10 rounded truncate">{protocol.difficulty}</span></div>

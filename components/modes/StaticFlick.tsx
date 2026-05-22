@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { BaseTarget, GameResult } from "@/lib/game/types";
 import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
 import {
@@ -11,99 +11,40 @@ import {
     isPointInsideTarget,
 } from "@/lib/utils/gameMath";
 import { createStaticTarget } from "@/lib/utils/targetSpawning";
-import { buildGameResult } from "@/lib/utils/resultBuilder";
-import { updateStatsWithResult } from "@/lib/utils/statsStorage";
-import { useGameEngine } from "@/hooks/useGameEngine";
-
+import { useBaseGameEngine } from "@/lib/hooks/useBaseGameEngine";
+import { useAuth } from "@/lib/contexts/AuthContext";
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
-import { spawnHitmarker } from "@/lib/utils/hitmarker";
-import { useAuth } from "@/lib/contexts/AuthContext";
 import ComboMeter from "@/components/ComboMeter";
+import { spawnHitmarker } from "@/lib/utils/hitmarker";
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; taskId?: string; }
 interface StaticFlickProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
 
 export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickProps = {}) {
-    const containerRef = useRef<HTMLDivElement | null>(null);
-    const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const timeoutRef = useRef<number | null>(null);
-    const sessionStartRef = useRef<number>(0);
-    const lastHitTargetIdRef = useRef<string | null>(null);
-    const activeTargetId = useRef<string | null>(null);
-
     const { isTrial } = useAuth();
-
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
     const effectiveDifficulty = overrideSettings?.difficulty ?? difficulty;
 
     const [target, setTarget] = useState<BaseTarget | null>(null);
-    const [score, setScore] = useState(0);
-    const [hits, setHits] = useState(0);
-    const [misses, setMisses] = useState(0);
-    const [combo, setCombo] = useState(0);
-    const [reactionTimes, setReactionTimes] = useState<number[]>([]);
-    const [totalTargetsSpawned, setTotalTargetsSpawned] = useState(0);
-    const [missedByTimeout, setMissedByTimeout] = useState(0);
-    const [result, setResult] = useState<GameResult | null>(null);
+    const activeTargetId = useRef<string | null>(null);
+    const lastHitTargetIdRef = useRef<string | null>(null);
+    const sessionStartRef = useRef<number>(0);
 
-    // Score refs so closures always read fresh values
-    const scoreRef = useRef(0);
-    const hitsRef = useRef(0);
-    const missesRef = useRef(0);
-    const comboRef = useRef(0);
-    const reactionTimesRef = useRef<number[]>([]);
-    const totalSpawnedRef = useRef(0);
-    const missedByTimeoutRef = useRef(0);
-
-    const config = difficultyConfig[effectiveDifficulty];
-    const accuracy = useMemo(() => calculateAccuracy(hits, misses), [hits, misses]);
-    const averageReactionTime = useMemo(() => calculateAverageReactionTime(reactionTimes), [reactionTimes]);
-    const bestReactionTime = useMemo(() => calculateBestReactionTime(reactionTimes), [reactionTimes]);
-
-    const clearTargetTimeout = useCallback(() => {
-        if (timeoutRef.current !== null) {
-            window.clearTimeout(timeoutRef.current);
-            timeoutRef.current = null;
-        }
-    }, []);
-
-    const endSessionCallback = useCallback(async () => {
-        clearTargetTimeout();
-        setTarget(null);
-
-        const resultData = buildGameResult({
-            mode: "Static Flick",
-            difficulty: difficultyLabels[effectiveDifficulty],
-            score: scoreRef.current,
-            hits: hitsRef.current,
-            misses: missesRef.current,
-            duration: engine.duration,
-            reactionTimes: reactionTimesRef.current,
-            extraStats: { "Timeout Misses": missedByTimeoutRef.current, "Targets Spawned": totalSpawnedRef.current },
-            taskId: overrideSettings?.taskId,
-        });
-
-        await updateStatsWithResult(resultData);
-        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-
-        if (onFinish) {
-            onFinish(resultData);
-        } else {
-            setResult(resultData);
-            engine.endSession();
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [effectiveDifficulty, clearTargetTimeout, onFinish, overrideSettings?.taskId]);
-
-    const engine = useGameEngine({
-        defaultDuration: overrideSettings?.duration ?? 30,
-        onTimerEnd: endSessionCallback,
-        canvasRef,
+    const engine = useBaseGameEngine({
+        modeId: "static-flick",
+        overrideSettings,
+        onSessionComplete: onFinish,
     });
 
+    const config = difficultyConfig[effectiveDifficulty];
+
+    const accuracy = calculateAccuracy(engine.hits, engine.misses);
+    const averageReactionTime = calculateAverageReactionTime(engine.reactionTimes);
+    const bestReactionTime = calculateBestReactionTime(engine.reactionTimes);
+
     const spawnTarget = useCallback(() => {
-        clearTargetTimeout();
+        engine.clearAllTimersAndLoops();
         const currentSession = engine.sessionIdxRef.current;
         const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
         const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, engine.duration);
@@ -112,122 +53,73 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
         activeTargetId.current = nextTarget.id;
 
         setTarget(nextTarget);
-        totalSpawnedRef.current += 1;
-        setTotalTargetsSpawned(totalSpawnedRef.current);
+        engine.incrementSpawned();
 
-        timeoutRef.current = window.setTimeout(() => {
+        engine.addTimeout(() => {
             if (engine.sessionIdxRef.current !== currentSession) return;
-            missesRef.current += 1;
-            missedByTimeoutRef.current += 1;
-            comboRef.current = 0;
-            scoreRef.current = Math.max(0, scoreRef.current - config.missPenalty);
-            setMisses(missesRef.current);
-            setMissedByTimeout(missedByTimeoutRef.current);
-            setCombo(0);
-            setScore(scoreRef.current);
+            engine.incrementTimeoutMiss(config.missPenalty);
             spawnTarget();
         }, config.targetLifetimeMs);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [clearTargetTimeout, config, effectiveDifficulty, engine.dimensions, engine.duration, engine.sessionIdxRef]);
+    }, [config, effectiveDifficulty, engine.dimensions, engine.duration, engine.incrementSpawned, engine.incrementTimeoutMiss]);
+
+    const preRenderedCanvasRef = useRef<HTMLCanvasElement | OffscreenCanvas | null>(null);
+    const lastPreRenderedRadius = useRef<number | null>(null);
 
     // Canvas render effect — fires whenever target or dimensions change
     useEffect(() => {
-        const canvas = canvasRef.current;
+        const canvas = engine.canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
-        const w = engine.dimensions.width;
-        const h = engine.dimensions.height;
-        if (canvas.width !== w || canvas.height !== h) {
-            canvas.width = w;
-            canvas.height = h;
-        }
-        ctx.clearRect(0, 0, w, h);
+        ctx.clearRect(0, 0, engine.dimensions.width, engine.dimensions.height);
 
         if (target) {
             const t = target;
+            const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+
+            if (!preRenderedCanvasRef.current || lastPreRenderedRadius.current !== t.radius) {
+                const { preRenderStaticFlickTarget } = require("@/lib/utils/canvasHelpers");
+                preRenderedCanvasRef.current = preRenderStaticFlickTarget(t.radius, dpr);
+                lastPreRenderedRadius.current = t.radius;
+            }
+
             const glowRadius = t.radius * 1.7;
-
-            // Outer ambient glow
-            const glow = ctx.createRadialGradient(t.x, t.y, t.radius * 0.5, t.x, t.y, glowRadius);
-            glow.addColorStop(0, "rgba(239, 68, 68, 0.35)");
-            glow.addColorStop(1, "rgba(239, 68, 68, 0)");
-            ctx.beginPath();
-            ctx.arc(t.x, t.y, glowRadius, 0, Math.PI * 2);
-            ctx.fillStyle = glow;
-            ctx.fill();
-
-            // Inner ring outline
-            ctx.beginPath();
-            ctx.arc(t.x, t.y, t.radius + 2, 0, Math.PI * 2);
-            ctx.strokeStyle = "rgba(255, 100, 100, 0.6)";
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-
-            // Core sphere gradient
-            const gradient = ctx.createRadialGradient(
-                t.x - t.radius * 0.3, t.y - t.radius * 0.3, t.radius * 0.1,
-                t.x, t.y, t.radius
-            );
-            gradient.addColorStop(0, "#FFCCCC");
-            gradient.addColorStop(0.35, "#EF4444");
-            gradient.addColorStop(1, "#550000");
-            ctx.beginPath();
-            ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
-            ctx.fillStyle = gradient;
-            ctx.shadowColor = "rgba(239, 68, 68, 0.7)";
-            ctx.shadowBlur = 20;
-            ctx.fill();
-            ctx.shadowBlur = 0;
-
-            // Specular highlight (top-left gleam)
-            const spec = ctx.createRadialGradient(
-                t.x - t.radius * 0.35, t.y - t.radius * 0.35, 0,
-                t.x - t.radius * 0.35, t.y - t.radius * 0.35, t.radius * 0.5
-            );
-            spec.addColorStop(0, "rgba(255,255,255,0.5)");
-            spec.addColorStop(1, "rgba(255,255,255,0)");
-            ctx.beginPath();
-            ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
-            ctx.fillStyle = spec;
-            ctx.fill();
+            const size = Math.ceil(glowRadius * 2) + 8;
+            ctx.drawImage(preRenderedCanvasRef.current as any, t.x - size / 2, t.y - size / 2, size, size);
         }
-    }, [target, engine.dimensions]);
+    }, [target, engine.dimensions, engine.canvasRef]);
+
+    const lastClickTimeRef = useRef<number>(0);
 
     const handleStartGame = async () => {
-        // Reset all refs and state
-        scoreRef.current = 0; hitsRef.current = 0; missesRef.current = 0;
-        comboRef.current = 0; reactionTimesRef.current = []; totalSpawnedRef.current = 0;
-        missedByTimeoutRef.current = 0;
-        setScore(0); setHits(0); setMisses(0); setCombo(0);
-        setReactionTimes([]); setTotalTargetsSpawned(0); setMissedByTimeout(0);
-        setTarget(null); setResult(null);
+        setTarget(null);
         lastHitTargetIdRef.current = null;
+        lastClickTimeRef.current = 0;
         sessionStartRef.current = performance.now();
-
-        if (containerRef.current && !document.fullscreenElement) {
-            await containerRef.current.requestFullscreen().catch(() => {});
-        }
-        engine.beginSession(overrideSettings?.duration);
+        engine.beginSession();
     };
 
     // Spawn first target when engine transitions to "live"
     const prevPhaseRef = useRef(engine.phase);
-    if (engine.phase === "live" && prevPhaseRef.current !== "live") {
-        prevPhaseRef.current = "live";
-        spawnTarget();
-    } else if (engine.phase !== "live") {
+    useEffect(() => {
+        if (engine.phase === "live" && prevPhaseRef.current !== "live") {
+            sessionStartRef.current = performance.now();
+            spawnTarget();
+        }
         prevPhaseRef.current = engine.phase;
-    }
+    }, [engine.phase, spawnTarget]);
 
-    // Cleanup on unmount
-    useEffect(() => () => clearTargetTimeout(), [clearTargetTimeout]);
-
-    const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const handleCanvasMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
         if (engine.phase !== "live" || !target || engine.countdown !== null) return;
         if (target.id !== activeTargetId.current) return;
-        const canvas = canvasRef.current;
+
+        const now = performance.now();
+        if (now - lastClickTimeRef.current < 80) return;
+        lastClickTimeRef.current = now;
+
+        const canvas = engine.canvasRef.current;
         if (!canvas) return;
 
         const { x, y } = getScaledCanvasCoordinates(event, canvas, engine.dimensions.width, engine.dimensions.height);
@@ -237,40 +129,28 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
             lastHitTargetIdRef.current = target.id;
 
             const reaction = performance.now() - target.spawnedAt;
-            comboRef.current += 1;
-            hitsRef.current += 1;
-            scoreRef.current += config.scorePerHit + (comboRef.current * 5);
-            reactionTimesRef.current.push(reaction);
-
-            setHits(hitsRef.current);
-            setCombo(comboRef.current);
-            setScore(scoreRef.current);
-            setReactionTimes([...reactionTimesRef.current]);
+            engine.triggerHit(reaction);
+            engine.incrementScore(config.scorePerHit + (engine.combo * 5));
             spawnHitmarker(event.clientX, event.clientY);
             spawnTarget();
             return;
         }
 
-        missesRef.current += 1;
-        comboRef.current = 0;
-        scoreRef.current = Math.max(0, scoreRef.current - config.missPenalty);
-        setMisses(missesRef.current);
-        setCombo(0);
-        setScore(scoreRef.current);
+        engine.triggerMiss(config.missPenalty);
         spawnTarget();
     };
 
     const isCountingDown = engine.countdown !== null && engine.countdown > 0;
     const isLive = engine.phase === "live";
-    const isFinished = engine.phase === "finished" && result !== null;
+    const isFinished = engine.phase === "finished" && engine.result !== null;
 
     return (
-        <div ref={containerRef} className="relative w-full h-screen flex flex-col bg-[#121212] text-[#EAEAEA] overflow-hidden">
+        <div ref={engine.containerRef} className="relative w-full h-screen flex flex-col bg-[#121212] text-[#EAEAEA] overflow-hidden">
 
             {/* RESULTS SCREEN */}
-            {isFinished && result && (
+            {isFinished && engine.result && (
                 <div className="absolute inset-0 z-[100]">
-                    <ResultsScreen result={result} onRestart={handleStartGame} onBackToMenu={engine.resetToMenu} />
+                    <ResultsScreen result={engine.result} onRestart={handleStartGame} onBackToMenu={engine.resetToMenu} />
                 </div>
             )}
 
@@ -294,7 +174,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
                                                 {Object.entries(difficultyLabels).map(([key, label]) => (
                                                     <option key={key} value={key} disabled={isTrial && key !== "eco" && key !== "bonus"}>
                                                         {label.toUpperCase()}{isTrial && key !== "eco" && key !== "bonus" ? " 🔒" : ""}
-                                                    </option>
+                                                     </option>
                                                 ))}
                                             </select>
                                         </label>
@@ -328,15 +208,15 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
                                 mode: "Static Flick",
                                 difficulty: difficultyLabels[effectiveDifficulty],
                                 timeLeft: engine.timeLeft,
-                                score,
-                                hits,
-                                misses,
+                                score: engine.score,
+                                hits: engine.hits,
+                                misses: engine.misses,
                                 accuracy,
                                 averageReactionTime,
                                 bestReactionTime,
                                 extraLines: [
-                                    { label: "Spawned", value: totalTargetsSpawned },
-                                    { label: "Timeouts", value: missedByTimeout },
+                                    { label: "Spawned", value: engine.totalTargetsSpawned },
+                                    { label: "Timeouts", value: engine.missedByTimeout },
                                 ],
                             }}
                         />
@@ -351,13 +231,13 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
 
                         <div className="relative z-10 w-full h-full">
                             <canvas
-                                ref={canvasRef}
+                                ref={engine.canvasRef}
                                 width={engine.dimensions.width}
                                 height={engine.dimensions.height}
-                                onClick={handleCanvasClick}
+                                onMouseDown={handleCanvasMouseDown}
                                 className="absolute inset-0 block cursor-crosshair"
                             />
-                            <ComboMeter combo={combo} />
+                            <ComboMeter combo={engine.combo} />
                         </div>
 
                         {/* COUNTDOWN OVERLAY */}

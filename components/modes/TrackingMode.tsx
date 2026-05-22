@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GameResult, MovingTarget } from "@/lib/game/types";
 import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
 import {
@@ -11,9 +11,7 @@ import {
     isPointInsideTarget,
 } from "@/lib/utils/gameMath";
 import { createTrackingTarget, updateTrackingTargetPosition } from "@/lib/utils/targetSpawning";
-import { buildGameResult } from "@/lib/utils/resultBuilder";
-import { updateStatsWithResult } from "@/lib/utils/statsStorage";
-import { useGameEngine } from "@/hooks/useGameEngine";
+import { useBaseGameEngine } from "@/lib/hooks/useBaseGameEngine";
 
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
@@ -24,88 +22,36 @@ interface OverrideSettings { difficulty: Difficulty; duration: number; taskId?: 
 interface TrackingModeProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
 
 export default function TrackingMode({ overrideSettings, onFinish }: TrackingModeProps = {}) {
-    const containerRef = useRef<HTMLDivElement | null>(null);
-    const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const animationFrameRef = useRef<number | null>(null);
     const targetRef = useRef<TrueTrackingTarget | null>(null);
     const mouseRef = useRef({ x: 0, y: 0 });
 
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
     const effectiveDifficulty = overrideSettings?.difficulty ?? difficulty;
 
-    const [score, setScore] = useState(0);
-    const [hits, setHits] = useState(0);
-    const [misses, setMisses] = useState(0);
-    const [reactionTimes] = useState<number[]>([]);
-    const [missedByTimeout, setMissedByTimeout] = useState(0);
-    const [result, setResult] = useState<GameResult | null>(null);
-
-    const config = difficultyConfig[effectiveDifficulty];
-    const accuracy = useMemo(() => calculateAccuracy(hits, misses), [hits, misses]);
-    const averageReactionTime = useMemo(() => calculateAverageReactionTime(reactionTimes), [reactionTimes]);
-    const bestReactionTime = useMemo(() => calculateBestReactionTime(reactionTimes), [reactionTimes]);
-
-    // ─── Score refs to read current values inside rAF closures ───
-    const scoreRef = useRef(0);
-    const hitsRef = useRef(0);
-    const missesRef = useRef(0);
-    const missedByTimeoutRef = useRef(0);
-
-    const endSessionCallback = useCallback(async () => {
-        if (animationFrameRef.current) {
-            cancelAnimationFrame(animationFrameRef.current);
-            animationFrameRef.current = null;
-        }
-        targetRef.current = null;
-
-        const resultData = buildGameResult({
-            mode: "Tracking Protocol",
-            difficulty: difficultyLabels[effectiveDifficulty],
-            score: scoreRef.current,
-            hits: hitsRef.current,
-            misses: missesRef.current,
-            duration: engine.duration,
-            reactionTimes,
-            extraStats: { "Timeout Misses": missedByTimeoutRef.current },
-            taskId: overrideSettings?.taskId,
-        });
-
-        await updateStatsWithResult(resultData);
-
-        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-
-        if (onFinish) {
-            onFinish(resultData);
-        } else {
-            setResult(resultData);
-            engine.endSession();
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [effectiveDifficulty, reactionTimes, onFinish, overrideSettings?.taskId]);
-
-    const engine = useGameEngine({
-        defaultDuration: overrideSettings?.duration ?? 30,
-        onTimerEnd: endSessionCallback,
-        canvasRef,
+    const engine = useBaseGameEngine({
+        modeId: "tracking-mode",
+        overrideSettings,
+        onSessionComplete: onFinish,
     });
 
-    const clearAnimation = () => {
-        if (animationFrameRef.current !== null) {
-            cancelAnimationFrame(animationFrameRef.current);
-            animationFrameRef.current = null;
-        }
-    };
+    const config = difficultyConfig[effectiveDifficulty];
+    const accuracy = calculateAccuracy(engine.hits, engine.misses);
+    const averageReactionTime = calculateAverageReactionTime(engine.reactionTimes);
+    const bestReactionTime = calculateBestReactionTime(engine.reactionTimes);
+
+    const preRenderedHitCanvasRef = useRef<HTMLCanvasElement | OffscreenCanvas | null>(null);
+    const preRenderedMissCanvasRef = useRef<HTMLCanvasElement | OffscreenCanvas | null>(null);
+    const lastPreRenderedRadius = useRef<number | null>(null);
 
     const startTrackingLoop = useCallback(() => {
-        clearAnimation();
         let lastTime = performance.now();
 
         const tick = (currentTime: number) => {
-            if (!engine.isMountedRef.current) return;
+            if (!engine.isMountedRef.current || engine.phase !== "live") return;
             const deltaTime = currentTime - lastTime;
             lastTime = currentTime;
 
-            const canvas = canvasRef.current;
+            const canvas = engine.canvasRef.current;
             const ctx = canvas?.getContext("2d");
 
             if (canvas && ctx && targetRef.current) {
@@ -115,65 +61,38 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
                 const { x, y } = mouseRef.current;
                 const isHit = isPointInsideTarget(x, y, nextTarget.x, nextTarget.y, nextTarget.radius);
                 let newHealth = targetRef.current.health;
-                if (isHit) newHealth -= (deltaTime * 0.25);
+
+                if (isHit) {
+                    newHealth -= (deltaTime * 0.25);
+                }
 
                 if (newHealth <= 0) {
                     targetRef.current = null;
-                    hitsRef.current += 1;
-                    scoreRef.current += config.scorePerHit + 50;
-                    setHits(hitsRef.current);
-                    setScore(scoreRef.current);
+                    engine.incrementScore(config.scorePerHit + 50);
+                    engine.triggerHit(0); // tracking reaction logs as 0
                     spawnTarget();
                     return;
                 }
 
                 targetRef.current = { ...nextTarget, health: newHealth, isBeingTracked: isHit } as TrueTrackingTarget;
 
-                // Resize canvas to match parent if needed
-                if (canvas.width !== w || canvas.height !== h) {
-                    canvas.width = w;
-                    canvas.height = h;
-                }
                 ctx.clearRect(0, 0, w, h);
 
                 const t = targetRef.current;
+                const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 
-                // Outer glow ring
+                if (!preRenderedHitCanvasRef.current || !preRenderedMissCanvasRef.current || lastPreRenderedRadius.current !== t.radius) {
+                    const { preRenderTrackingTarget } = require("@/lib/utils/canvasHelpers");
+                    preRenderedHitCanvasRef.current = preRenderTrackingTarget(t.radius, true, dpr);
+                    preRenderedMissCanvasRef.current = preRenderTrackingTarget(t.radius, false, dpr);
+                    lastPreRenderedRadius.current = t.radius;
+                }
+
                 const glowRadius = t.radius * 1.6;
-                const glow = ctx.createRadialGradient(t.x, t.y, t.radius * 0.5, t.x, t.y, glowRadius);
-                if (isHit) {
-                    glow.addColorStop(0, "rgba(0, 229, 255, 0.35)");
-                    glow.addColorStop(1, "rgba(0, 229, 255, 0)");
-                } else {
-                    glow.addColorStop(0, "rgba(239, 68, 68, 0.30)");
-                    glow.addColorStop(1, "rgba(239, 68, 68, 0)");
-                }
-                ctx.beginPath();
-                ctx.arc(t.x, t.y, glowRadius, 0, Math.PI * 2);
-                ctx.fillStyle = glow;
-                ctx.fill();
+                const size = Math.ceil(glowRadius * 2) + 8;
+                const activeCanvas = isHit ? preRenderedHitCanvasRef.current : preRenderedMissCanvasRef.current;
 
-                // Core sphere gradient
-                const gradient = ctx.createRadialGradient(
-                    t.x - t.radius * 0.3, t.y - t.radius * 0.3, t.radius * 0.1,
-                    t.x, t.y, t.radius
-                );
-                if (isHit) {
-                    gradient.addColorStop(0, "#CBD5E1");
-                    gradient.addColorStop(0.3, "#00E5FF");
-                    gradient.addColorStop(1, "#004455");
-                } else {
-                    gradient.addColorStop(0, "#FFCCCC");
-                    gradient.addColorStop(0.3, "#EF4444");
-                    gradient.addColorStop(1, "#550000");
-                }
-                ctx.beginPath();
-                ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
-                ctx.fillStyle = gradient;
-                ctx.shadowColor = isHit ? "rgba(0, 229, 255, 0.8)" : "rgba(239, 68, 68, 0.6)";
-                ctx.shadowBlur = 20;
-                ctx.fill();
-                ctx.shadowBlur = 0;
+                ctx.drawImage(activeCanvas as any, t.x - size / 2, t.y - size / 2, size, size);
 
                 // Health bar
                 const barW = t.radius * 2;
@@ -188,17 +107,16 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
                 ctx.fill();
             }
 
-            animationFrameRef.current = requestAnimationFrame(tick);
+            engine.addAnimationFrame(tick);
         };
 
-        animationFrameRef.current = requestAnimationFrame(tick);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [config, engine.dimensions, engine.isMountedRef]);
+        engine.addAnimationFrame(tick);
+    }, [config, engine]);
 
     const spawnTarget = useCallback(() => {
-        clearAnimation();
+        engine.clearAllTimersAndLoops();
         const currentSession = engine.sessionIdxRef.current;
-        const elapsedSec = 0; // simplified
+        const elapsedSec = 0;
         const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, engine.duration);
 
         const baseTarget = createTrackingTarget(
@@ -210,61 +128,65 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
         targetRef.current = { ...baseTarget, health: 100, isBeingTracked: false };
         startTrackingLoop();
 
-        window.setTimeout(() => {
+        engine.addTimeout(() => {
             if (!engine.isMountedRef.current || engine.sessionIdxRef.current !== currentSession) return;
-            missesRef.current += 1;
-            missedByTimeoutRef.current += 1;
-            scoreRef.current = Math.max(0, scoreRef.current - config.missPenalty);
-            setMisses(missesRef.current);
-            setMissedByTimeout(missedByTimeoutRef.current);
-            setScore(scoreRef.current);
+            engine.incrementTimeoutMiss(config.missPenalty);
             spawnTarget();
         }, config.targetLifetimeMs + 1000);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [config, effectiveDifficulty, engine.dimensions, engine.duration, engine.isMountedRef, engine.sessionIdxRef, startTrackingLoop]);
+    }, [config, effectiveDifficulty, engine, startTrackingLoop]);
 
     const handleStartGame = async () => {
-        // Reset all score refs
-        scoreRef.current = 0;
-        hitsRef.current = 0;
-        missesRef.current = 0;
-        missedByTimeoutRef.current = 0;
-        setScore(0); setHits(0); setMisses(0); setMissedByTimeout(0); setResult(null);
         targetRef.current = null;
-
-        if (containerRef.current && !document.fullscreenElement) {
-            await containerRef.current.requestFullscreen().catch(() => {});
-        }
-        engine.beginSession(overrideSettings?.duration);
+        engine.beginSession();
     };
 
-    // When engine phase transitions to "live", spawn first target
+    // Spawn first target when engine transitions to "live"
     const prevPhaseRef = useRef(engine.phase);
-    if (engine.phase === "live" && prevPhaseRef.current !== "live") {
-        prevPhaseRef.current = "live";
-        spawnTarget();
-    } else if (engine.phase !== "live") {
+    useEffect(() => {
+        if (engine.phase === "live" && prevPhaseRef.current !== "live") {
+            spawnTarget();
+        }
         prevPhaseRef.current = engine.phase;
-    }
+    }, [engine.phase, spawnTarget]);
 
     const updateMousePosition = (event: React.MouseEvent<HTMLCanvasElement>) => {
-        if (!canvasRef.current) return;
-        const { x, y } = getScaledCanvasCoordinates(event, canvasRef.current, engine.dimensions.width, engine.dimensions.height);
+        if (!engine.canvasRef.current) return;
+        const { x, y } = getScaledCanvasCoordinates(event, engine.canvasRef.current, engine.dimensions.width, engine.dimensions.height);
         mouseRef.current.x = x;
         mouseRef.current.y = y;
+
+        // In tracking mode, moving the mouse checks tracking collision;
+        // to increment stats, we count mouse movements inside target as "hits" or check hits via target health drain.
+        // We can increment hits/misses based on tracking.
+        // Let's check how hits/misses are counted in continuous tracking:
+        // Clicks or hover?
+        // Wait, in continuous tracking, hits are incremented when a target's health reaches 0 (line 122 of legacy TrackingMode).
+        // Let's check misses: misses are incremented when target lifetime expires (line 215 of legacy TrackingMode).
+        // So they are counted automatically!
+    };
+
+    const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+        if (!engine.canvasRef.current) return;
+        const { x, y } = getScaledCanvasCoordinates(event, engine.canvasRef.current, engine.dimensions.width, engine.dimensions.height);
+        if (targetRef.current) {
+            const isHit = isPointInsideTarget(x, y, targetRef.current.x, targetRef.current.y, targetRef.current.radius);
+            if (!isHit) {
+                engine.triggerMiss(config.missPenalty);
+            }
+        }
     };
 
     const isCountingDown = engine.countdown !== null && engine.countdown > 0;
     const isLive = engine.phase === "live";
-    const isFinished = engine.phase === "finished" && result !== null;
+    const isFinished = engine.phase === "finished" && engine.result !== null;
 
     return (
-        <div ref={containerRef} className="relative w-full h-screen flex flex-col bg-[#121212] text-white overflow-hidden">
+        <div ref={engine.containerRef} className="relative w-full h-screen flex flex-col bg-[#121212] text-white overflow-hidden">
 
             {/* RESULTS SCREEN */}
-            {isFinished && result && (
+            {isFinished && engine.result && (
                 <div className="absolute inset-0 z-[100]">
-                    <ResultsScreen result={result} onRestart={handleStartGame} onBackToMenu={engine.resetToMenu} />
+                    <ResultsScreen result={engine.result} onRestart={handleStartGame} onBackToMenu={engine.resetToMenu} />
                 </div>
             )}
 
@@ -320,13 +242,13 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
                                 mode: "Tracking Protocol",
                                 difficulty: difficultyLabels[effectiveDifficulty],
                                 timeLeft: engine.timeLeft,
-                                score,
-                                hits,
-                                misses,
+                                score: engine.score,
+                                hits: engine.hits,
+                                misses: engine.misses,
                                 accuracy,
                                 averageReactionTime,
                                 bestReactionTime,
-                                extraLines: [{ label: "Timeouts", value: missedByTimeout }],
+                                extraLines: [{ label: "Timeouts", value: engine.missedByTimeout }],
                             }}
                         />
                     </div>
@@ -339,11 +261,12 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
                         </div>
                         <div className="relative z-10 w-full h-full">
                             <canvas
-                                ref={canvasRef}
+                                ref={engine.canvasRef}
                                 width={engine.dimensions.width}
                                 height={engine.dimensions.height}
                                 onMouseMove={updateMousePosition}
                                 onMouseDown={updateMousePosition}
+                                onClick={handleCanvasClick}
                                 className="absolute inset-0 block cursor-crosshair"
                             />
                         </div>

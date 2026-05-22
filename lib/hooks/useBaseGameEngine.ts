@@ -1,0 +1,543 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { GameResult } from "@/lib/game/types";
+import { getModeConfig } from "@/lib/config/modeRegistry";
+import { buildGameResult } from "@/lib/utils/resultBuilder";
+import { updateStatsWithResult } from "@/lib/utils/statsStorage";
+import { difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
+
+interface UseBaseGameEngineOptions {
+  modeId: string;
+  overrideSettings?: {
+    difficulty: Difficulty;
+    duration: number;
+    taskId?: string;
+  };
+  onSessionComplete?: (res: GameResult) => void;
+}
+
+export function useBaseGameEngine({
+  modeId,
+  overrideSettings,
+  onSessionComplete,
+}: UseBaseGameEngineOptions) {
+  const [phase, setPhase] = useState<"menu" | "countdown" | "live" | "finished">("menu");
+  const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
+  const [duration, setDuration] = useState<number>(overrideSettings?.duration ?? 30);
+  const [timeLeft, setTimeLeft] = useState<number>(overrideSettings?.duration ?? 30);
+  const [countdown, setCountdown] = useState<number | null>(null);
+
+  const [score, setScore] = useState(0);
+  const [hits, setHits] = useState(0);
+  const [misses, setMisses] = useState(0);
+  const [combo, setCombo] = useState(0);
+  const [maxCombo, setMaxCombo] = useState(0);
+  const [reactionTimes, setReactionTimes] = useState<number[]>([]);
+  const [totalTargetsSpawned, setTotalTargetsSpawned] = useState(0);
+  const [missedByTimeout, setMissedByTimeout] = useState(0);
+  const [result, setResult] = useState<GameResult | null>(null);
+
+  const scoreRef = useRef(0);
+  const hitsRef = useRef(0);
+  const missesRef = useRef(0);
+  const comboRef = useRef(0);
+  const maxComboRef = useRef(0);
+  const reactionTimesRef = useRef<number[]>([]);
+  const totalSpawnedRef = useRef(0);
+  const missedByTimeoutRef = useRef(0);
+
+  const bgCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const uiCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const mousePosRef = useRef({ x: 0, y: 0 });
+  const [feedback, setFeedback] = useState<"hit" | "miss" | null>(null);
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [dimensions, setDimensions] = useState({ width: 1600, height: 900 });
+  const dimensionsRef = useRef({ width: 1600, height: 900 });
+
+  const isMountedRef = useRef(true);
+  const sessionIdxRef = useRef(0);
+
+  const timeoutRefs = useRef<number[]>([]);
+  const intervalRefs = useRef<number[]>([]);
+  const animationFrameRefs = useRef<number[]>([]);
+
+  const addTimeout = useCallback((cb: () => void, delay: number) => {
+    const id = window.setTimeout(cb, delay);
+    timeoutRefs.current.push(id);
+    return id;
+  }, []);
+
+  const addInterval = useCallback((cb: () => void, delay: number) => {
+    const id = window.setInterval(cb, delay);
+    intervalRefs.current.push(id);
+    return id;
+  }, []);
+
+  const addAnimationFrame = useCallback((cb: (t: number) => void) => {
+    const id = requestAnimationFrame(cb);
+    animationFrameRefs.current.push(id);
+    return id;
+  }, []);
+
+  const muteAudioPool = useCallback(() => {
+    if (typeof window !== "undefined" && (window as any).audioPool) {
+      const pool = (window as any).audioPool;
+      if (Array.isArray(pool)) {
+        pool.forEach((audio: any) => {
+          try {
+            audio.pause();
+            audio.currentTime = 0;
+          } catch (e) {
+            // ignore
+          }
+        });
+      }
+    }
+  }, []);
+
+  const clearAllTimersAndLoops = useCallback(() => {
+    timeoutRefs.current.forEach(window.clearTimeout);
+    timeoutRefs.current = [];
+    intervalRefs.current.forEach(window.clearInterval);
+    intervalRefs.current = [];
+    animationFrameRefs.current.forEach(cancelAnimationFrame);
+    animationFrameRefs.current = [];
+  }, []);
+
+  // Update parameters from overrideSettings if they change
+  useEffect(() => {
+    if (overrideSettings?.difficulty) setDifficulty(overrideSettings.difficulty);
+    if (overrideSettings?.duration) {
+      setDuration(overrideSettings.duration);
+      setTimeLeft(overrideSettings.duration);
+    }
+  }, [overrideSettings]);
+
+  // Handle unmount cleanup
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      clearAllTimersAndLoops();
+      muteAudioPool();
+    };
+  }, [clearAllTimersAndLoops, muteAudioPool]);
+
+
+  // Canvas Resize Observer & High-DPI context scaling
+  useEffect(() => {
+    if (phase !== "live" && phase !== "countdown") return;
+    const updateSize = () => {
+      const canvas = canvasRef.current;
+      const bgCanvas = bgCanvasRef.current;
+      const uiCanvas = uiCanvasRef.current;
+      const parent = canvas?.parentElement;
+      if (parent) {
+        const { clientWidth, clientHeight } = parent;
+        const dims = { width: clientWidth, height: clientHeight };
+        setDimensions(dims);
+        dimensionsRef.current = dims;
+
+        const dpr = typeof window !== "undefined" ? (window.devicePixelRatio || 1) : 1;
+
+        [bgCanvas, canvas, uiCanvas].forEach((c) => {
+          if (!c) return;
+          const targetWidth = clientWidth * dpr;
+          const targetHeight = clientHeight * dpr;
+          if (c.width !== targetWidth || c.height !== targetHeight) {
+            c.width = targetWidth;
+            c.height = targetHeight;
+            const ctx = c.getContext("2d");
+            if (ctx) {
+              ctx.setTransform(1, 0, 0, 1, 0, 0); // reset scale to avoid accumulation
+              ctx.scale(dpr, dpr);
+            }
+          }
+        });
+
+        // Redraw static background grid
+        if (bgCanvas) {
+          const { drawBackgroundGrid } = require("@/lib/utils/canvasHelpers");
+          drawBackgroundGrid(bgCanvas, clientWidth, clientHeight, modeId);
+        }
+      }
+    };
+    const observer = new ResizeObserver(updateSize);
+    if (canvasRef.current?.parentElement) {
+      observer.observe(canvasRef.current.parentElement);
+    }
+    updateSize();
+    return () => observer.disconnect();
+  }, [phase, modeId]);
+
+  // Dynamic stacked canvas elements injection for Layered Canvas Rendering
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    if (!parent) return;
+
+    // Ensure parent is styled for absolute stacking
+    const parentStyle = window.getComputedStyle(parent);
+    if (parentStyle.position === "static") {
+      parent.style.position = "relative";
+    }
+
+    // Hide default cursor on game canvas to use custom crosshair
+    canvas.style.cursor = "none";
+
+    // 1. Setup Layer 1: bg-canvas
+    let bgCanvas = parent.querySelector(".aimsync-bg-canvas") as HTMLCanvasElement;
+    if (!bgCanvas) {
+      bgCanvas = document.createElement("canvas");
+      bgCanvas.className = "aimsync-bg-canvas absolute inset-0 block pointer-events-none";
+      bgCanvas.style.zIndex = "1";
+      bgCanvas.style.position = "absolute";
+      bgCanvas.style.top = "0";
+      bgCanvas.style.left = "0";
+      bgCanvas.style.width = "100%";
+      bgCanvas.style.height = "100%";
+      parent.insertBefore(bgCanvas, canvas);
+    }
+    bgCanvasRef.current = bgCanvas;
+
+    // Structure Layer 2: game-canvas
+    canvas.classList.add("absolute", "inset-0", "block");
+    canvas.style.position = "absolute";
+    canvas.style.top = "0";
+    canvas.style.left = "0";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.zIndex = "2";
+
+    // 2. Setup Layer 3: ui-canvas
+    let uiCanvas = parent.querySelector(".aimsync-ui-canvas") as HTMLCanvasElement;
+    if (!uiCanvas) {
+      uiCanvas = document.createElement("canvas");
+      uiCanvas.className = "aimsync-ui-canvas absolute inset-0 block pointer-events-none";
+      uiCanvas.style.zIndex = "3";
+      uiCanvas.style.position = "absolute";
+      uiCanvas.style.top = "0";
+      uiCanvas.style.left = "0";
+      uiCanvas.style.width = "100%";
+      uiCanvas.style.height = "100%";
+      parent.appendChild(uiCanvas);
+    }
+    uiCanvasRef.current = uiCanvas;
+
+    // Track mouse coordinates for drawing custom crosshair on ui-canvas
+    const handleMouseMove = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      mousePosRef.current = { x, y };
+
+      const { drawCrosshair } = require("@/lib/utils/canvasHelpers");
+      drawCrosshair(uiCanvas, dimensionsRef.current.width, dimensionsRef.current.height, x, y, feedback);
+    };
+
+    canvas.addEventListener("mousemove", handleMouseMove);
+
+    // Initial renders
+    const { drawBackgroundGrid, drawCrosshair } = require("@/lib/utils/canvasHelpers");
+    drawBackgroundGrid(bgCanvas, dimensionsRef.current.width, dimensionsRef.current.height, modeId);
+
+    const initialX = modeId === "echolocation" ? dimensionsRef.current.width / 2 : mousePosRef.current.x || dimensionsRef.current.width / 2;
+    const initialY = modeId === "echolocation" ? dimensionsRef.current.height / 2 : mousePosRef.current.y || dimensionsRef.current.height / 2;
+    drawCrosshair(uiCanvas, dimensionsRef.current.width, dimensionsRef.current.height, initialX, initialY, null);
+
+    return () => {
+      canvas.removeEventListener("mousemove", handleMouseMove);
+    };
+  }, [canvasRef.current, modeId, dimensions.width, dimensions.height]);
+
+  // Redraw custom crosshair on feedback changes
+  useEffect(() => {
+    const uiCanvas = uiCanvasRef.current;
+    if (!uiCanvas) return;
+    const { drawCrosshair } = require("@/lib/utils/canvasHelpers");
+    const initialX = modeId === "echolocation" ? dimensions.width / 2 : mousePosRef.current.x || dimensions.width / 2;
+    const initialY = modeId === "echolocation" ? dimensions.height / 2 : mousePosRef.current.y || dimensions.height / 2;
+    drawCrosshair(uiCanvas, dimensions.width, dimensions.height, initialX, initialY, feedback);
+  }, [feedback, dimensions, modeId]);
+
+  // Countdown Loop
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown === 0) {
+      setCountdown(null);
+      setPhase("live");
+      return;
+    }
+    const id = window.setTimeout(() => {
+      if (isMountedRef.current) {
+        setCountdown((c) => (c !== null ? c - 1 : null));
+      }
+    }, 1000);
+    timeoutRefs.current.push(id);
+    return () => window.clearTimeout(id);
+  }, [countdown]);
+
+  // Session Ticker
+  useEffect(() => {
+    if (phase !== "live") return;
+    setTimeLeft(duration);
+
+    const id = window.setInterval(() => {
+      if (!isMountedRef.current) return;
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          window.clearInterval(id);
+          // End session callback
+          endSession();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    intervalRefs.current.push(id);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, duration]);
+
+  const endSession = useCallback(async () => {
+    clearAllTimersAndLoops();
+    muteAudioPool();
+    setPhase("finished");
+
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => {});
+    }
+
+    const config = getModeConfig(modeId);
+    let finalScore = scoreRef.current;
+    let extraStats: Record<string, any> = {
+      "Timeout Misses": missedByTimeoutRef.current,
+      "Targets Spawned": totalSpawnedRef.current,
+    };
+
+    if (modeId === "flick-benchmark") {
+      const totalShots = hitsRef.current + missesRef.current;
+      const rawAccuracy = totalShots > 0 ? hitsRef.current / totalShots : 0;
+      const penaltyMultiplier = rawAccuracy < 0.85 ? Math.pow(rawAccuracy / 0.85, 2) : 1;
+      finalScore = Math.round((hitsRef.current * 1000) * penaltyMultiplier);
+      extraStats = {
+        "Raw Accuracy": `${(rawAccuracy * 100).toFixed(1)}%`,
+        "Penalty Applied": penaltyMultiplier < 1 ? `${((1 - penaltyMultiplier) * 100).toFixed(0)}%` : "None",
+        "Timeouts": missedByTimeoutRef.current,
+      };
+    } else if (modeId === "consistency-check") {
+      const times = reactionTimesRef.current;
+      if (times.length >= 10) {
+        const mean = times.reduce((a, b) => a + b, 0) / times.length;
+        const variance = times.reduce((a, t) => a + Math.pow(t - mean, 2), 0) / times.length;
+        const stdDev = Math.sqrt(variance);
+        const cv = stdDev / mean;
+        const stability = Math.max(0, Math.round(100 - cv * 200));
+        let label = "Severe Variance / Fatigue Failure";
+        if (stability > 90) label = "Robotic Precision";
+        else if (stability > 75) label = "Highly Stable";
+        else if (stability > 50) label = "Moderate Fatigue Detected";
+
+        extraStats = {
+          "Stability Score": `${stability}%`,
+          "Assessment": label,
+          "Std Dev Track": `${Math.round(stdDev)}ms`,
+        };
+      } else {
+        extraStats = {
+          "Stability Score": "0%",
+          "Assessment": "Insufficient Data",
+          "Std Dev Track": "0ms",
+        };
+      }
+    }
+
+    const resultData = buildGameResult({
+      mode: config.name,
+      difficulty: difficultyLabels[difficulty],
+      score: finalScore,
+      hits: hitsRef.current,
+      misses: missesRef.current,
+      duration: duration,
+      reactionTimes: reactionTimesRef.current,
+      extraStats: extraStats,
+      taskId: overrideSettings?.taskId,
+    });
+
+    if (modeId === "flick-benchmark") {
+      resultData.isBenchmark = true;
+    }
+
+    await updateStatsWithResult(resultData);
+    setResult(resultData);
+
+    if (onSessionComplete) {
+      onSessionComplete(resultData);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeId, difficulty, duration, overrideSettings?.taskId, onSessionComplete, clearAllTimersAndLoops, muteAudioPool]);
+
+  const beginSession = useCallback(async () => {
+    clearAllTimersAndLoops();
+    muteAudioPool();
+    sessionIdxRef.current++;
+
+    scoreRef.current = 0;
+    hitsRef.current = 0;
+    missesRef.current = 0;
+    comboRef.current = 0;
+    maxComboRef.current = 0;
+    reactionTimesRef.current = [];
+    totalSpawnedRef.current = 0;
+    missedByTimeoutRef.current = 0;
+
+    setScore(0);
+    setHits(0);
+    setMisses(0);
+    setCombo(0);
+    setMaxCombo(0);
+    setReactionTimes([]);
+    setTotalTargetsSpawned(0);
+    setMissedByTimeout(0);
+    setResult(null);
+
+    if (containerRef.current && !document.fullscreenElement) {
+      await containerRef.current.requestFullscreen().catch(() => {});
+    }
+
+    setPhase("countdown");
+    const countdownVal = modeId === "consistency-check" ? 5 : 3;
+    setCountdown(countdownVal);
+  }, [modeId, clearAllTimersAndLoops, muteAudioPool]);
+
+  // Auto-Start logic for Daily Contract and Playlists
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const autoStart = searchParams.get("autoStart") === "true";
+    if (autoStart && phase === "menu") {
+      const timer = setTimeout(() => {
+        beginSession();
+      }, 400); // 400ms delay to allow ResizeObserver layout sizing to stabilize
+      return () => clearTimeout(timer);
+    }
+  }, [phase, beginSession]);
+
+  const resetToMenu = useCallback(() => {
+    clearAllTimersAndLoops();
+    muteAudioPool();
+    sessionIdxRef.current++;
+    setPhase("menu");
+    setTimeLeft(duration);
+    setCountdown(null);
+    setResult(null);
+  }, [duration, clearAllTimersAndLoops, muteAudioPool]);
+
+  const triggerHit = useCallback((reactionTime: number) => {
+    hitsRef.current++;
+    comboRef.current++;
+    if (comboRef.current > maxComboRef.current) {
+      maxComboRef.current = comboRef.current;
+    }
+    reactionTimesRef.current.push(reactionTime);
+
+    setHits(hitsRef.current);
+    setCombo(comboRef.current);
+    setMaxCombo(maxComboRef.current);
+    setReactionTimes([...reactionTimesRef.current]);
+
+    setFeedback("hit");
+    const id = window.setTimeout(() => setFeedback(null), 150);
+    timeoutRefs.current.push(id);
+  }, []);
+
+  const triggerMiss = useCallback((penalty = 0) => {
+    missesRef.current++;
+    comboRef.current = 0;
+
+    setMisses(missesRef.current);
+    setCombo(0);
+
+    if (penalty > 0) {
+      scoreRef.current = Math.max(0, scoreRef.current - penalty);
+      setScore(scoreRef.current);
+    }
+
+    setFeedback("miss");
+    const id = window.setTimeout(() => setFeedback(null), 150);
+    timeoutRefs.current.push(id);
+  }, []);
+
+  const incrementScore = useCallback((amount: number) => {
+    scoreRef.current += amount;
+    setScore(scoreRef.current);
+  }, []);
+
+  const incrementSpawned = useCallback(() => {
+    totalSpawnedRef.current++;
+    setTotalTargetsSpawned(totalSpawnedRef.current);
+  }, []);
+
+  const incrementTimeoutMiss = useCallback((penalty = 0) => {
+    missedByTimeoutRef.current++;
+    missesRef.current++;
+    comboRef.current = 0;
+
+    setMissedByTimeout(missedByTimeoutRef.current);
+    setMisses(missesRef.current);
+    setCombo(0);
+
+    if (penalty > 0) {
+      scoreRef.current = Math.max(0, scoreRef.current - penalty);
+      setScore(scoreRef.current);
+    }
+
+    setFeedback("miss");
+    const id = window.setTimeout(() => setFeedback(null), 150);
+    timeoutRefs.current.push(id);
+  }, []);
+
+  return {
+    phase,
+    setPhase,
+    timeLeft,
+    countdown,
+    score,
+    hits,
+    misses,
+    combo,
+    maxCombo,
+    reactionTimes,
+    totalTargetsSpawned,
+    missedByTimeout,
+    result,
+    difficulty,
+    setDifficulty,
+    duration,
+    setDuration,
+    canvasRef,
+    bgCanvasRef,
+    uiCanvasRef,
+    containerRef,
+    dimensions,
+    dimensionsRef,
+    isMountedRef,
+    sessionIdxRef,
+    beginSession,
+    endSession,
+    resetToMenu,
+    triggerHit,
+    triggerMiss,
+    incrementScore,
+    incrementSpawned,
+    incrementTimeoutMiss,
+    addTimeout,
+    addInterval,
+    addAnimationFrame,
+    clearAllTimersAndLoops,
+  };
+}
