@@ -71,5 +71,9 @@ wrangler.toml.bak
 *.log
 *.lock.bak
 
+# editors
+.vscode/
+.idea/
+
 #changes
 AimSync Log.txt
