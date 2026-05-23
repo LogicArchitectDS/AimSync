@@ -36,6 +36,14 @@ export interface GameResult {
     extraStats?: Record<string, string | number>; // Flexible field for mode-specific data
     isBenchmark?: boolean; // true = official, unmodified benchmark run
     taskId?: string; // Optional: Links back to Dashboard Operation task ID
+    ghostTelemetry?: string; // Compressed JSON representation of ghost run
+    username?: string; // User name (for leaderboard submission)
+    missQuadrants?: {
+        topLeft: number;
+        topRight: number;
+        bottomLeft: number;
+        bottomRight: number;
+    };
 }
 
 // 2. The Aggregated Profile (For the Dashboard)
@@ -65,6 +73,12 @@ export interface UserStats {
         precisionXp: number;
         perceptionXp: number;
         cognitionXp: number;
+    };
+    missQuadrants?: {
+        topLeft: number;
+        topRight: number;
+        bottomLeft: number;
+        bottomRight: number;
     };
 }
 // 3. The Custom Training System

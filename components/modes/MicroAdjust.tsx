@@ -147,7 +147,7 @@ export default function MicroAdjust({ overrideSettings, onFinish }: MicroAdjustP
             return;
         }
 
-        engine.triggerMiss(config.missPenalty);
+        engine.triggerMiss(config.missPenalty, x, y, target.x, target.y);
         spawnTarget();
     };
 

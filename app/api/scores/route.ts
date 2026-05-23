@@ -89,6 +89,39 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }
 
+    if (body.stats) {
+        const db = await getDb();
+        if (!db) {
+            return NextResponse.json({ success: true, mocked: true });
+        }
+        try {
+            await db.prepare(`
+                INSERT INTO player_stats (user_id, global_accuracy, total_games, time_played, modes_data, playlists, miss_quadrants, last_played_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    global_accuracy = excluded.global_accuracy,
+                    total_games = excluded.total_games,
+                    time_played = excluded.time_played,
+                    modes_data = excluded.modes_data,
+                    playlists = excluded.playlists,
+                    miss_quadrants = excluded.miss_quadrants,
+                    last_played_at = CURRENT_TIMESTAMP
+            `).bind(
+                userId,
+                body.stats.globalAccuracy || 0,
+                body.stats.totalGamesPlayed || 0,
+                body.stats.timePlayedSeconds || 0,
+                JSON.stringify(body.stats.modes || {}),
+                JSON.stringify(body.stats.playlists || []),
+                JSON.stringify(body.stats.missQuadrants || {})
+            ).run();
+            return NextResponse.json({ success: true });
+        } catch (error) {
+            console.error('D1 sync stats error:', error);
+            return NextResponse.json({ error: 'Sync failed' }, { status: 500 });
+        }
+    }
+
     const exerciseId = body.exerciseId || body.exercise_id || 'unknown';
     const hits = typeof body.hits === 'number' ? body.hits : (body.rawScoreData?.hits ?? 0);
     const misses = typeof body.misses === 'number' ? body.misses : (body.rawScoreData?.misses ?? 0);
@@ -97,6 +130,10 @@ export async function POST(request: Request) {
     // Advanced kinematic telemetry (StaticFlick / FlickBenchmark only; defaults to 1.0 for other modes)
     const averageUrgencyIndex   = typeof body.averageUrgencyIndex   === 'number' ? body.averageUrgencyIndex   : 1.0;
     const overFlickCoefficient  = typeof body.overFlickCoefficient  === 'number' ? body.overFlickCoefficient  : 1.0;
+    const difficulty            = body.difficulty || "medium";
+    const username              = session.user.name || session.user.email || "Player";
+    const ghostTelemetry        = body.ghostTelemetry || body.ghost_telemetry || null;
+    const missQuadrants         = body.missQuadrants || body.miss_quadrants || null;
 
     const totalTargets = hits + misses;
     const accuracy = totalTargets > 0 ? (hits / totalTargets) * 100 : 0;
@@ -148,19 +185,21 @@ export async function POST(request: Request) {
     try {
         // Read current stats from D1
         const userProgress = await db.prepare(
-            "SELECT current_level, total_xp, surgeon_badge_unlocked, vector_lock_badge_unlocked FROM user_progression WHERE user_id = ?"
+            "SELECT current_level, total_xp, surgeon_badge_unlocked, vector_lock_badge_unlocked, vanguard_badge_unlocked FROM user_progression WHERE user_id = ?"
         ).bind(userId).first();
 
         let oldLevel = 1;
         let oldTotalXp = 0;
         let oldSurgeon = 0;
         let oldVector = 0;
+        let oldVanguard = 0;
 
         if (userProgress) {
             oldLevel = Number(userProgress.current_level) || 1;
             oldTotalXp = Number(userProgress.total_xp) || 0;
             oldSurgeon = Number(userProgress.surgeon_badge_unlocked) || 0;
             oldVector = Number(userProgress.vector_lock_badge_unlocked) || 0;
+            oldVanguard = Number(userProgress.vanguard_badge_unlocked) || 0;
         }
 
         // Milestone Badge Checklist
@@ -196,26 +235,29 @@ export async function POST(request: Request) {
         // SQL migration required on first deploy:
         //   ALTER TABLE scores_telemetry ADD COLUMN average_urgency_index REAL DEFAULT 1.0;
         //   ALTER TABLE scores_telemetry ADD COLUMN over_flick_coefficient REAL DEFAULT 1.0;
+        //   ALTER TABLE scores_telemetry ADD COLUMN miss_quadrants TEXT;
+        const missQuadrantsStr = missQuadrants ? JSON.stringify(missQuadrants) : null;
         const stmtTelemetry = db.prepare(`
             INSERT INTO scores_telemetry
-                (user_id, exercise_id, hits, misses, accuracy, max_combo, duration_seconds,
-                 xp_earned, integrity_flag, average_urgency_index, over_flick_coefficient)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (user_id, exercise_id, difficulty, username, ghost_telemetry, hits, misses, accuracy, max_combo, duration_seconds,
+                 xp_earned, integrity_flag, average_urgency_index, over_flick_coefficient, miss_quadrants)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(
-            userId, exerciseId, hits, misses, accuracy, maxCombo, durationSeconds,
-            xpEarned, integrityFlag, averageUrgencyIndex, overFlickCoefficient
+            userId, exerciseId, difficulty, username, ghostTelemetry, hits, misses, accuracy, maxCombo, durationSeconds,
+            xpEarned, integrityFlag, averageUrgencyIndex, overFlickCoefficient, missQuadrantsStr
         );
 
         const stmtProgression = db.prepare(`
-            INSERT INTO user_progression (user_id, current_level, total_xp, surgeon_badge_unlocked, vector_lock_badge_unlocked, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO user_progression (user_id, current_level, total_xp, surgeon_badge_unlocked, vector_lock_badge_unlocked, vanguard_badge_unlocked, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(user_id) DO UPDATE SET
                 current_level = excluded.current_level,
                 total_xp = excluded.total_xp,
                 surgeon_badge_unlocked = excluded.surgeon_badge_unlocked,
                 vector_lock_badge_unlocked = excluded.vector_lock_badge_unlocked,
+                vanguard_badge_unlocked = excluded.vanguard_badge_unlocked,
                 updated_at = CURRENT_TIMESTAMP
-        `).bind(userId, currentLevel, newTotalXp, surgeonBadgeUnlocked, vectorLockBadgeUnlocked);
+        `).bind(userId, currentLevel, newTotalXp, surgeonBadgeUnlocked, vectorLockBadgeUnlocked, oldVanguard);
 
         await db.batch([stmtTelemetry, stmtProgression]);
 

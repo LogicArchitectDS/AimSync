@@ -148,6 +148,28 @@ export const GAME_MODES: Record<string, GameModeConfig> = {
     spawnBoundingBox: DEFAULT_BOUNDING_BOX,
     targetCount: 1,
     movementVelocity: 0
+  },
+  "blind-flick": {
+    id: "blind-flick",
+    name: "Sound-Spatialization Anchor",
+    description: "Flick to invisible targets relying purely on 2D audio panning. Targets flash on mouse-stop.",
+    supportsCombo: true,
+    baseTargetRadius: 30,
+    interactionType: "CLICK",
+    spawnBoundingBox: DEFAULT_BOUNDING_BOX,
+    targetCount: 1,
+    movementVelocity: 0
+  },
+  "jiggle-peek": {
+    id: "jiggle-peek",
+    name: "Jiggle Peek Duel",
+    description: "Engage targets peeking briefly from cover. Shooting while cover is active triggers misfire penalties.",
+    supportsCombo: true,
+    baseTargetRadius: 20,
+    interactionType: "CLICK",
+    spawnBoundingBox: DEFAULT_BOUNDING_BOX,
+    targetCount: 1,
+    movementVelocity: 0
   }
 };
 
@@ -168,6 +190,12 @@ export function getModeConfig(modeId: string): GameModeConfig {
   }
   if (normalizedId === "micro-adjust") {
     return GAME_MODES["micro-adjust"];
+  }
+  if (normalizedId === "blind-flick" || normalizedId === "sound-spatialization-anchor") {
+    return GAME_MODES["blind-flick"];
+  }
+  if (normalizedId === "jiggle-peek" || normalizedId === "jasp-jiggle-peek") {
+    return GAME_MODES["jiggle-peek"];
   }
 
   return GAME_MODES[normalizedId] || {

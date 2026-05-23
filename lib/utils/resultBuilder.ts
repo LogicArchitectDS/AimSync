@@ -43,6 +43,7 @@ export function buildGameResult(rawData: any): GameResult {
         durationSeconds: rawData.duration || 30,
         createdAt: new Date().toISOString(), // Standardized timestamp for charts
         extraStats: rawData.extraStats || {},
-        taskId: rawData.taskId
+        taskId: rawData.taskId,
+        missQuadrants: rawData.missQuadrants
     };
 }

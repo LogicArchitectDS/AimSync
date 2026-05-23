@@ -18,6 +18,7 @@ import ResultsScreen from "@/components/ResultsScreen";
 import ComboMeter from "@/components/ComboMeter";
 import { spawnHitmarker } from "@/lib/utils/hitmarker";
 import { useKinematicsTracker } from "@/lib/hooks/useKinematicsTracker";
+import StreakAnnouncer from "@/components/StreakAnnouncer";
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; taskId?: string; }
 interface StaticFlickProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
@@ -55,13 +56,31 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
         engine.clearAllTimersAndLoops();
         const currentSession = engine.sessionIdxRef.current;
         const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
-        const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, engine.duration);
-        const nextTarget = createStaticTarget(engine.dimensions.width, engine.dimensions.height, radius);
-        nextTarget.spawnedAt = performance.now();
+        
+        let nextTarget;
+        const targetIndex = engine.totalTargetsSpawned;
+        if (engine.loadedGhost && engine.loadedGhost.targets && engine.loadedGhost.targets[targetIndex]) {
+            const gTgt = engine.loadedGhost.targets[targetIndex];
+            const x = (gTgt.x / 1000) * engine.dimensions.width;
+            const y = (gTgt.y / 1000) * engine.dimensions.height;
+            const radius = (gTgt.radius / 1000) * Math.min(engine.dimensions.width, engine.dimensions.height);
+            nextTarget = {
+                id: crypto.randomUUID(),
+                x,
+                y,
+                radius,
+                spawnedAt: performance.now(),
+            };
+        } else {
+            const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, engine.duration);
+            nextTarget = createStaticTarget(engine.dimensions.width, engine.dimensions.height, radius);
+            nextTarget.spawnedAt = performance.now();
+        }
         activeTargetId.current = nextTarget.id;
 
         setTarget(nextTarget);
         engine.incrementSpawned();
+        engine.recordSpawnedTarget(nextTarget.x, nextTarget.y, nextTarget.radius);
 
         // Register the new target with the kinematic tracker.
         // Use the current mousePosRef coordinates as the cursor-at-spawn position.
@@ -81,7 +100,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
             spawnTarget();
         }, config.targetLifetimeMs);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [config, effectiveDifficulty, engine.dimensions, engine.duration, engine.incrementSpawned, engine.incrementTimeoutMiss]);
+    }, [config, effectiveDifficulty, engine.dimensions, engine.duration, engine.incrementSpawned, engine.incrementTimeoutMiss, engine.totalTargetsSpawned, engine.loadedGhost, engine.recordSpawnedTarget]);
 
     const preRenderedCanvasRef = useRef<HTMLCanvasElement | OffscreenCanvas | null>(null);
     const lastPreRenderedRadius = useRef<number | null>(null);
@@ -178,6 +197,8 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
             if (target.id === lastHitTargetIdRef.current) return;
             lastHitTargetIdRef.current = target.id;
 
+            engine.recordHitEvent(target.x, target.y, performance.now() - sessionStartRef.current);
+
             // ── Kinematic diagnostics ──────────────────────────────────────────
             const kinResult = kinematics.computeOnHit(target.id);
             if (kinResult) {
@@ -205,7 +226,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
             return;
         }
 
-        engine.triggerMiss(config.missPenalty);
+        engine.triggerMiss(config.missPenalty, x, y, target.x, target.y);
         spawnTarget();
     };
 
@@ -307,6 +328,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
                                 className="absolute inset-0 block cursor-crosshair"
                             />
                             <ComboMeter combo={engine.combo} />
+                            <StreakAnnouncer combo={engine.combo} />
                         </div>
 
                         {/* COUNTDOWN OVERLAY */}

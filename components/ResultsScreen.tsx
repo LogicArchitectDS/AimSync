@@ -87,10 +87,15 @@ export default function ResultsScreen({
             try {
                 const payload = {
                     exerciseId: currentMode,
+                    difficulty: result?.difficulty || "medium",
                     hits,
                     misses,
                     maxCombo,
-                    durationSeconds
+                    durationSeconds,
+                    ghostTelemetry: result?.ghostTelemetry || null,
+                    averageUrgencyIndex: result?.extraStats?.["Urgency Index"] ?? 1.0,
+                    overFlickCoefficient: result?.extraStats?.["Over-Flick Coefficient"] ?? 1.0,
+                    missQuadrants: result?.missQuadrants || null
                 };
 
                 const response = await fetch('/api/scores', {
@@ -118,7 +123,7 @@ export default function ResultsScreen({
         };
 
         transmitTelemetry();
-    }, [currentMode, hits, misses, maxCombo, durationSeconds]);
+    }, [currentMode, hits, misses, maxCombo, durationSeconds, result?.difficulty, result?.ghostTelemetry]);
 
     const handleNextContractDrill = () => {
         if (dailyState) {

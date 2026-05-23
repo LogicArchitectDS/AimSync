@@ -7,6 +7,7 @@ import { buildGameResult } from "@/lib/utils/resultBuilder";
 import { updateStatsWithResult } from "@/lib/utils/statsStorage";
 import { difficultyLabels, type Difficulty } from "@/lib/utils/drillConfig";
 import { audioEngine } from "@/lib/services/audioEngine";
+import { StorageEngine } from "@/lib/utils/storage";
 
 interface UseBaseGameEngineOptions {
   modeId: string;
@@ -66,6 +67,35 @@ export function useBaseGameEngine({
    */
   const kinematicsExtraStatsRef = useRef<Record<string, number>>({});
   const [feedback, setFeedback] = useState<"hit" | "miss" | null>(null);
+
+  // --- Ghost Recording & Replay State & Refs ---
+  const [loadedGhost, setLoadedGhost] = useState<any>(null);
+  const loadedGhostRef = useRef<any>(null);
+  const recordingPathRef = useRef<[number, number, number][]>([]);
+  const recordingTargetsRef = useRef<{ x: number; y: number; radius: number }[]>([]);
+  const recordingHitsRef = useRef<{ x: number; y: number; t: number }[]>([]);
+  const lastPathRecordTimeRef = useRef<number>(0);
+  const sessionStartTimeRef = useRef<number>(0);
+  const ghostCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const missQuadrantsRef = useRef({ topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 });
+
+
+  const recordSpawnedTarget = useCallback((x: number, y: number, radius: number) => {
+    const { width, height } = dimensionsRef.current;
+    if (width <= 0 || height <= 0) return;
+    const normX = (x / width) * 1000;
+    const normY = (y / height) * 1000;
+    const normR = (radius / Math.min(width, height)) * 1000;
+    recordingTargetsRef.current.push({ x: normX, y: normY, radius: normR });
+  }, []);
+
+  const recordHitEvent = useCallback((x: number, y: number, t: number) => {
+    const { width, height } = dimensionsRef.current;
+    if (width <= 0 || height <= 0) return;
+    const normX = (x / width) * 1000;
+    const normY = (y / height) * 1000;
+    recordingHitsRef.current.push({ x: normX, y: normY, t });
+  }, []);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dimensions, setDimensions] = useState({ width: 1600, height: 900 });
@@ -137,6 +167,7 @@ export function useBaseGameEngine({
     const updateSize = () => {
       const canvas = canvasRef.current;
       const bgCanvas = bgCanvasRef.current;
+      const ghostCanvas = ghostCanvasRef.current;
       const uiCanvas = uiCanvasRef.current;
       const parent = canvas?.parentElement;
       if (parent) {
@@ -147,7 +178,7 @@ export function useBaseGameEngine({
 
         const dpr = typeof window !== "undefined" ? (window.devicePixelRatio || 1) : 1;
 
-        [bgCanvas, canvas, uiCanvas].forEach((c) => {
+        [bgCanvas, canvas, ghostCanvas, uiCanvas].forEach((c) => {
           if (!c) return;
           const targetWidth = clientWidth * dpr;
           const targetHeight = clientHeight * dpr;
@@ -216,6 +247,21 @@ export function useBaseGameEngine({
     canvas.style.width = "100%";
     canvas.style.height = "100%";
     canvas.style.zIndex = "2";
+
+    // Setup Layer 2.5: ghost-canvas
+    let ghostCanvas = parent.querySelector(".aimsync-ghost-canvas") as HTMLCanvasElement;
+    if (!ghostCanvas) {
+      ghostCanvas = document.createElement("canvas");
+      ghostCanvas.className = "aimsync-ghost-canvas absolute inset-0 block pointer-events-none";
+      ghostCanvas.style.zIndex = "2.5";
+      ghostCanvas.style.position = "absolute";
+      ghostCanvas.style.top = "0";
+      ghostCanvas.style.left = "0";
+      ghostCanvas.style.width = "100%";
+      ghostCanvas.style.height = "100%";
+      parent.appendChild(ghostCanvas);
+    }
+    ghostCanvasRef.current = ghostCanvas;
 
     // 2. Setup Layer 3: ui-canvas
     let uiCanvas = parent.querySelector(".aimsync-ui-canvas") as HTMLCanvasElement;
@@ -305,6 +351,18 @@ export function useBaseGameEngine({
         };
       }
 
+      // Record telemetry if session is live
+      if (phaseRef.current === "live") {
+        const now = performance.now();
+        const elapsed = now - sessionStartTimeRef.current;
+        if (now - lastPathRecordTimeRef.current >= 30) {
+          const normX = (mousePosRef.current.x / width) * 1000;
+          const normY = (mousePosRef.current.y / height) * 1000;
+          recordingPathRef.current.push([normX, normY, elapsed]);
+          lastPathRecordTimeRef.current = now;
+        }
+      }
+
       // Crosshair draw is synchronous within the event callback —
       // completely decoupled from the rAF canvas loop.
       const { x, y } = mousePosRef.current;
@@ -354,6 +412,125 @@ export function useBaseGameEngine({
     timeoutRefs.current.push(id);
     return () => window.clearTimeout(id);
   }, [countdown]);
+
+  // Ghost Playback Loop and Lifecycle
+  useEffect(() => {
+    if (phase === "live") {
+      sessionStartTimeRef.current = performance.now();
+      recordingPathRef.current = [];
+      recordingTargetsRef.current = [];
+      recordingHitsRef.current = [];
+      lastPathRecordTimeRef.current = 0;
+
+      // Initialize Ghost playback
+      const activeGhostStr = localStorage.getItem("aimsync_active_ghost");
+      if (activeGhostStr) {
+        try {
+          const { decompressGhost } = require("@/lib/utils/ghostCompression");
+          const decompressed = decompressGhost(activeGhostStr);
+          if (decompressed.modeId === modeId) {
+            setLoadedGhost(decompressed);
+            loadedGhostRef.current = decompressed;
+
+            // Start replaying path
+            const runPlayback = () => {
+              if (phaseRef.current !== "live") return;
+              
+              const now = performance.now();
+              const elapsed = now - sessionStartTimeRef.current;
+              const ghostCanvas = ghostCanvasRef.current;
+              if (ghostCanvas && loadedGhostRef.current) {
+                const { width, height } = dimensionsRef.current;
+                const ctx = ghostCanvas.getContext("2d");
+                if (ctx) {
+                  ctx.clearRect(0, 0, width, height);
+
+                  const ghost = loadedGhostRef.current;
+                  const path = ghost.path;
+                  
+                  if (path.length > 0) {
+                    // Find current coordinates by interpolating path samples at `elapsed`
+                    let x = path[0][0];
+                    let y = path[0][1];
+
+                    let idx = 0;
+                    while (idx < path.length - 1 && path[idx + 1][2] < elapsed) {
+                      idx++;
+                    }
+
+                    if (idx < path.length - 1) {
+                      const p1 = path[idx];
+                      const p2 = path[idx + 1];
+                      const tDiff = p2[2] - p1[2];
+                      const tRatio = tDiff > 0 ? (elapsed - p1[2]) / tDiff : 1;
+                      x = p1[0] + (p2[0] - p1[0]) * tRatio;
+                      y = p1[1] + (p2[1] - p1[1]) * tRatio;
+                    } else {
+                      x = path[path.length - 1][0];
+                      y = path[path.length - 1][1];
+                    }
+
+                    const screenX = (x / 1000) * width;
+                    const screenY = (y / 1000) * height;
+
+                    // Draw a trail of the ghost's path
+                    ctx.beginPath();
+                    const startIdx = Math.max(0, idx - 15);
+                    let first = true;
+                    for (let i = startIdx; i <= idx; i++) {
+                      const px = (path[i][0] / 1000) * width;
+                      const py = (path[i][1] / 1000) * height;
+                      if (first) {
+                        ctx.moveTo(px, py);
+                        first = false;
+                      } else {
+                        ctx.lineTo(px, py);
+                      }
+                    }
+                    ctx.lineTo(screenX, screenY);
+                    ctx.strokeStyle = "rgba(0, 240, 255, 0.15)";
+                    ctx.lineWidth = 2.5;
+                    ctx.stroke();
+
+                    // Draw the faint secondary crosshair
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY, 6, 0, Math.PI * 2);
+                    ctx.strokeStyle = "rgba(0, 240, 255, 0.35)";
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY, 1, 0, Math.PI * 2);
+                    ctx.fillStyle = "rgba(0, 240, 255, 0.4)";
+                    ctx.fill();
+                  }
+                }
+              }
+              addAnimationFrame(runPlayback);
+            };
+            addAnimationFrame(runPlayback);
+          } else {
+            setLoadedGhost(null);
+            loadedGhostRef.current = null;
+          }
+        } catch (e) {
+          console.error("Ghost playback initialization failed:", e);
+        }
+      } else {
+        setLoadedGhost(null);
+        loadedGhostRef.current = null;
+      }
+    } else if (phase === "finished" || phase === "menu") {
+      setLoadedGhost(null);
+      loadedGhostRef.current = null;
+      // Clear ghost canvas
+      const canvas = ghostCanvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext("2d");
+        ctx?.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+  }, [phase, modeId, addAnimationFrame]);
 
   // Session Ticker
   useEffect(() => {
@@ -444,12 +621,46 @@ export function useBaseGameEngine({
       // Merge any kinematic averages written by the game mode during the session.
       extraStats: { ...extraStats, ...kinematicsExtraStatsRef.current },
       taskId: overrideSettings?.taskId,
+      missQuadrants: missQuadrantsRef.current,
     });
     // Clear the kinematics side-channel for the next session.
     kinematicsExtraStatsRef.current = {};
 
     if (modeId === "flick-benchmark") {
       resultData.isBenchmark = true;
+    }
+
+    // Determine if this is a new high score for the mode
+    let isNewHighScore = false;
+    try {
+      const stats = StorageEngine.getUserStats();
+      const currentHighScore = stats.modes[modeId]?.highScore || 0;
+      if (finalScore > currentHighScore) {
+        isNewHighScore = true;
+      }
+    } catch (e) {
+      console.error("Failed to check high score for ghost:", e);
+    }
+
+    if (isNewHighScore) {
+      try {
+        const { compressGhost } = require("@/lib/utils/ghostCompression");
+        const ghostRecord = {
+          modeId,
+          difficulty: resultData.difficulty,
+          score: finalScore,
+          targets: recordingTargetsRef.current,
+          path: recordingPathRef.current,
+          hits: recordingHitsRef.current,
+        };
+        const compressed = compressGhost(ghostRecord);
+        resultData.ghostTelemetry = compressed;
+        
+        // Save locally as personal best ghost
+        localStorage.setItem(`aimsync_ghost_${modeId}_${resultData.difficulty}`, compressed);
+      } catch (err) {
+        console.error("Failed to save high score ghost:", err);
+      }
     }
 
     await updateStatsWithResult(resultData);
@@ -477,6 +688,8 @@ export function useBaseGameEngine({
     reactionTimesRef.current = [];
     totalSpawnedRef.current = 0;
     missedByTimeoutRef.current = 0;
+    missQuadrantsRef.current = { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 };
+
 
     setScore(0);
     setHits(0);
@@ -537,20 +750,37 @@ export function useBaseGameEngine({
     setReactionTimes([...reactionTimesRef.current]);
 
     // Synthesize adaptive hit tone – scheduled on AudioContext timeline,
-    // completely outside the rAF canvas loop.
-    audioEngine.playHitSound(comboRef.current);
+    // completely outside the rAF canvas loop. Milestone sweeps for 10, 25, 50.
+    if (comboRef.current === 10) {
+      audioEngine.playCleanSound();
+    } else if (comboRef.current === 25) {
+      audioEngine.playLockedInSound();
+    } else if (comboRef.current === 50) {
+      audioEngine.playImpeccableSound();
+    } else {
+      audioEngine.playHitSound(comboRef.current);
+    }
 
     setFeedback("hit");
     const id = window.setTimeout(() => setFeedback(null), 150);
     timeoutRefs.current.push(id);
   }, []);
 
-  const triggerMiss = useCallback((penalty = 0) => {
+  const triggerMiss = useCallback((penalty = 0, clickX?: number, clickY?: number, targetX?: number, targetY?: number) => {
     missesRef.current++;
     comboRef.current = 0;
 
     setMisses(missesRef.current);
     setCombo(0);
+
+    if (clickX !== undefined && clickY !== undefined && targetX !== undefined && targetY !== undefined) {
+      const dx = clickX - targetX;
+      const dy = clickY - targetY;
+      if (dx < 0 && dy < 0) missQuadrantsRef.current.topLeft++;
+      else if (dx >= 0 && dy < 0) missQuadrantsRef.current.topRight++;
+      else if (dx < 0 && dy >= 0) missQuadrantsRef.current.bottomLeft++;
+      else if (dx >= 0 && dy >= 0) missQuadrantsRef.current.bottomRight++;
+    }
 
     if (penalty > 0) {
       scoreRef.current = Math.max(0, scoreRef.current - penalty);
@@ -637,5 +867,8 @@ export function useBaseGameEngine({
     clearAllTimersAndLoops,
     mousePosRef,
     kinematicsExtraStatsRef,
+    loadedGhost,
+    recordSpawnedTarget,
+    recordHitEvent,
   };
 }

@@ -20,6 +20,8 @@ import CustomRoutine from "@/components/modes/CustomRoutine";
 import Echolocation from "@/components/modes/Echolocation";
 import CognitiveOverdrive from "@/components/modes/CognitiveOverdrive";
 import RecoilReactiveEvasion from "@/components/modes/RecoilReactiveEvasion";
+import BlindFlick from "@/components/modes/BlindFlick";
+import JigglePeek from "@/components/modes/JigglePeek";
 import { DEFAULT_ROUTINES } from "@/lib/utils/routineEngine";
 import { Difficulty } from "@/lib/utils/drillConfig";
 
@@ -37,7 +39,9 @@ export type Mode =
     | "reaction-test"
     | "echolocation"
     | "cognitive-overdrive"
-    | "recoil-evasion";
+    | "recoil-evasion"
+    | "blind-flick"
+    | "jiggle-peek";
 
 const ModeRegistry: Record<Exclude<Mode, "menu">, React.ElementType<any>> = {
     "static-flick": StaticFlick,
@@ -53,6 +57,8 @@ const ModeRegistry: Record<Exclude<Mode, "menu">, React.ElementType<any>> = {
     "echolocation": Echolocation,
     "cognitive-overdrive": CognitiveOverdrive,
     "recoil-evasion": RecoilReactiveEvasion,
+    "blind-flick": BlindFlick,
+    "jiggle-peek": JigglePeek,
 };
 
 
@@ -72,6 +78,8 @@ export const protocolCards: { id: Exclude<Mode, "menu">; category: string; title
     { id: "echolocation", category: "Perception", title: "Echolocation", desc: "Rely on spatial audio to snap to targets behind you.", color: "#06b6d4" },
     { id: "cognitive-overdrive", category: "Cognitive", title: "Cognitive Overdrive", desc: "Target discrimination: shoot the hostile targets and avoid distractors.", color: "#3b82f6" },
     { id: "recoil-evasion", category: "Dynamic", title: "Recoil Evasion", desc: "Counteract weapon recoil while tracking a target that evades your spray pattern.", color: "#f87171" },
+    { id: "blind-flick", category: "Perception", title: "Blind Flick", desc: "Acquire targets in a dark void using spatial audio pans.", color: "#8b5cf6" },
+    { id: "jiggle-peek", category: "Combat", title: "Jiggle Peek", desc: "Practice reaction discipline against peeking targets.", color: "#f43f5e" },
 ];
 
 function GameEngine() {

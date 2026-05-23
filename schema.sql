@@ -23,5 +23,6 @@ CREATE TABLE player_stats (
     time_played INTEGER DEFAULT 0,
     modes_data TEXT DEFAULT '{}',
     playlists TEXT DEFAULT '[]',
+    miss_quadrants TEXT DEFAULT '{}',
     last_played_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

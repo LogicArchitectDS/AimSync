@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/contexts/AuthContext";
 import type { UserStats, CustomPlaylist, PlaylistTask } from "@/lib/game/types";
 import dynamic from 'next/dynamic';
 import { RoutineDirector } from "@/lib/services/routineDirector";
+import MuscleMemoryHeatmap from "@/components/MuscleMemoryHeatmap";
 
 const RadarProfiler = dynamic(() => import('@/components/RadarProfiler'), {
     ssr: false,
@@ -35,6 +36,7 @@ export default function DashboardPage() {
     const [stats, setStats] = useState<UserStats | null>(null);
     const [playlists, setPlaylists] = useState<CustomPlaylist[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [activeTab, setActiveTab] = useState<"training" | "heatmap">("training");
 
     const [dailyContract, setDailyContract] = useState<any>(null);
     const [isContractActive, setIsContractActive] = useState(false);
@@ -451,9 +453,34 @@ export default function DashboardPage() {
 
                 {/* RIGHT PANEL */}
                 <div className="lg:col-span-8 flex flex-col gap-6">
+                    {/* TAB CONTROL BUTTONS */}
+                    <div className="flex gap-2 border-b border-white/5 pb-2">
+                        <button
+                            onClick={() => setActiveTab("training")}
+                            className={`px-5 py-2.5 text-xs font-black uppercase tracking-widest transition-all border-b-2 ${
+                                activeTab === "training"
+                                    ? "border-blue-500 text-white"
+                                    : "border-transparent text-slate-500 hover:text-slate-300"
+                            }`}
+                        >
+                            Training Arena
+                        </button>
+                        <button
+                            onClick={() => setActiveTab("heatmap")}
+                            className={`px-5 py-2.5 text-xs font-black uppercase tracking-widest transition-all border-b-2 ${
+                                activeTab === "heatmap"
+                                    ? "border-cyan-400 text-white shadow-[0_4px_12px_rgba(34,211,238,0.15)]"
+                                    : "border-transparent text-slate-500 hover:text-slate-300"
+                            }`}
+                        >
+                            Muscle Memory Heatmap
+                        </button>
+                    </div>
 
-                    {/* DAILY CONTRACT PROTOCOL */}
-                    <div className="bg-[#0b0f19]/80 border border-blue-500/25 p-6 rounded-xl backdrop-blur-md relative overflow-hidden shadow-[0_0_30px_rgba(59,130,246,0.15)]">
+                    {activeTab === "training" ? (
+                        <>
+                            {/* DAILY CONTRACT PROTOCOL */}
+                            <div className="bg-[#0b0f19]/80 border border-blue-500/25 p-6 rounded-xl backdrop-blur-md relative overflow-hidden shadow-[0_0_30px_rgba(59,130,246,0.15)]">
                         {/* Glowing accent border */}
                         <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-blue-500 via-cyan-400 to-transparent" />
                         <div className="absolute -top-24 -right-24 w-64 h-64 bg-cyan-500/10 rounded-full blur-[80px] pointer-events-none" />
@@ -724,6 +751,10 @@ export default function DashboardPage() {
                             ))}
                         </div>
                     </div>
+                        </>
+                    ) : (
+                        <MuscleMemoryHeatmap safeStats={safeStats} />
+                    )}
 
                     {/* STAT GRID */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

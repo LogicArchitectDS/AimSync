@@ -1,0 +1,139 @@
+{
+  "name": "AimSync: Community Boss Fight Weekend Event",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 60
+            }
+          ]
+        }
+      },
+      "id": "weekend-hourly-trigger",
+      "name": "Hourly Interval Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://aimsync.pages.dev/api/community/bossfight",
+        "options": {}
+      },
+      "id": "get-community-hits",
+      "name": "Fetch Combined Hits",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.totalHits }}",
+              "operation": "largerEqual",
+              "value2": 1000000
+            }
+          ]
+        }
+      },
+      "id": "check-goal-met",
+      "name": "Is 1,000,000 Reached?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aimsync.pages.dev/api/community/bossfight",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"secret\": \"VANGUARD_DEV_SECRET\",\n  \"forceUnlock\": false\n}",
+        "options": {}
+      },
+      "id": "trigger-vanguard-unlock",
+      "name": "Trigger Vanguard Badge Unlock",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        920,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "webhookUrl": "https://discord.com/api/webhooks/your-discord-webhook",
+        "text": "=🏆 **COMMUNITY BOSS FIGHT ACCOMPLISHED!** 🏆\n\nThe AimSync community has joined forces and reached a combined **{{ $node[\"Fetch Combined Hits\"].json.totalHits.toLocaleString() }}** target hits this weekend!\n\n🛡️ The **Vanguard Crosshair Profile** and **Vanguard Badge** are now globally unlocked for all active participants! Check your Profile tab on the dashboard to equip it.\n\nKeep hitting those targets, team! Let's go!"
+      },
+      "id": "announce-discord",
+      "name": "Discord Announcement",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 1,
+      "position": [
+        1150,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Hourly Interval Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Combined Hits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Combined Hits": {
+      "main": [
+        [
+          {
+            "node": "Is 1,000,000 Reached?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is 1,000,000 Reached?": {
+      "main": [
+        [
+          {
+            "node": "Trigger Vanguard Badge Unlock",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Trigger Vanguard Badge Unlock": {
+      "main": [
+        [
+          {
+            "node": "Discord Announcement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

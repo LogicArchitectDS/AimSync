@@ -70,6 +70,17 @@ export const StorageEngine = {
             };
         }
 
+        // Initialize and accumulate missQuadrants
+        if (!stats.missQuadrants) {
+            stats.missQuadrants = { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 };
+        }
+        if (result.missQuadrants) {
+            stats.missQuadrants.topLeft = (stats.missQuadrants.topLeft || 0) + (result.missQuadrants.topLeft || 0);
+            stats.missQuadrants.topRight = (stats.missQuadrants.topRight || 0) + (result.missQuadrants.topRight || 0);
+            stats.missQuadrants.bottomLeft = (stats.missQuadrants.bottomLeft || 0) + (result.missQuadrants.bottomLeft || 0);
+            stats.missQuadrants.bottomRight = (stats.missQuadrants.bottomRight || 0) + (result.missQuadrants.bottomRight || 0);
+        }
+
         // Update global counters
         stats.totalGamesPlayed = (stats.totalGamesPlayed || 0) + 1;
         stats.timePlayedSeconds = (stats.timePlayedSeconds || 0) + result.durationSeconds;
@@ -213,6 +224,7 @@ export const StorageEngine = {
                         globalAccuracy: cloudData.global_accuracy,
                         modes: JSON.parse(cloudData.modes_data || '{}'),
                         playlists: JSON.parse(cloudData.playlists || '[]'),
+                        missQuadrants: JSON.parse(cloudData.miss_quadrants || '{}'),
                         lastPlayedAt: cloudData.last_played_at ? new Date(cloudData.last_played_at).toISOString() : new Date().toISOString()
                     } as any;
 

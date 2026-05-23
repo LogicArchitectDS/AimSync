@@ -115,3 +115,13 @@ AimSync Codebase Evolution & Integration Log
     - Updated `app/api/scores/route.ts` POST handler to parse `averageUrgencyIndex` and `overFlickCoefficient` from the telemetry payload and insert both into `scores_telemetry` with `DEFAULT 1.0`. SQL `ALTER TABLE` migration statements are documented as inline comments for Cloudflare D1 deployment.
     - Created `components/InsightsCard.tsx`: context-aware coaching card mounted on the dashboard that reads kinematic averages from `recentSessions` in localStorage, evaluates two threshold conditions (OFC > 1.20 → over-shooting warning; UI > 2.50 → micro-adjustment hesitancy alert), and renders matching glassmorphic coaching panels with animated entrance. All-clear state and no-data prompt also handled. Dynamically imported with `ssr: false` for localStorage safety.
     - All three engineering systems verified with zero TypeScript compilation errors across the full project.
+
+18. Asynchronous Ghost Rivals, Dopamine Loop Streaks, Advanced Drills, Muscle Memory Heatmap & n8n Workflows
+    - Created the Asynchronous Rival "Ghost" System: compiles and delta-compresses coordinates and timestamps of target hits into compact JSON, rendering a fainted trail crosshair.
+    - Integrated Tactical Streak Announcers: programmed combo audio packs paired with scale-animated CSS texts at 10, 25, and 50 streaks.
+    - Developed Sound-Spatialization Anchor (Blind Flicking): utilizes stereo panning nodes and mouse stop detection to trigger a 150ms flash window.
+    - Developed Jasp/Jiggle Peek Duel: 2.5D visual cover peeking with a sawtooth buzzer misfire penalty.
+    - Implemented "Muscle Memory" Heatmap Tab: added a responsive dashboard tab rendering quadrant miss coordinates on an HTML5 canvas overlay with context-aware AI mechanical bias diagnosis.
+    - Upgraded Cloud D1 sync: supported atomic sync updates to D1 player_stats and schema migrations.
+    - Built Edge API Webhook /api/community/bossfight and composed n8n workflow JSON pipelines (weekly AI coach and community weekend boss fight).
+    - Verified compilation and built project successfully with exit code 0.

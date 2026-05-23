@@ -109,6 +109,115 @@ class AudioEngine {
     };
   }
 
+  // ─── Streak Announcer Sounds ──────────────────────────────────────────────────
+
+  /**
+   * Plays a beautiful, high-frequency dual-pitch chime for a 10-hit combo ("Clean").
+   * Dual pitches: C5 (523.25 Hz) then G5 (783.99 Hz).
+   */
+  playCleanSound(): void {
+    if (!this.ctx || !this.isSoundEnabled()) return;
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime;
+
+    const playNote = (freq: number, startDelay: number, duration: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, t0 + startDelay);
+      
+      gain.gain.setValueAtTime(0.25, t0 + startDelay);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + startDelay + duration);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.start(t0 + startDelay);
+      osc.stop(t0 + startDelay + duration + 0.02);
+      
+      osc.onended = () => {
+        osc.disconnect();
+        gain.disconnect();
+      };
+    };
+
+    playNote(523.25, 0, 0.12);
+    playNote(783.99, 0.08, 0.18);
+  }
+
+  /**
+   * Plays a rapid, ascending arpeggio for a 25-hit combo ("Locked In").
+   * Notes: A4 (440Hz), C#5 (554Hz), E5 (659Hz), A5 (880Hz).
+   */
+  playLockedInSound(): void {
+    if (!this.ctx || !this.isSoundEnabled()) return;
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime;
+
+    const notes = [440.00, 554.37, 659.25, 880.00];
+    notes.forEach((freq, idx) => {
+      const delay = idx * 0.04;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, t0 + delay);
+      
+      gain.gain.setValueAtTime(0.2, t0 + delay);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + delay + 0.15);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.start(t0 + delay);
+      osc.stop(t0 + delay + 0.17);
+      
+      osc.onended = () => {
+        osc.disconnect();
+        gain.disconnect();
+      };
+    });
+  }
+
+  /**
+   * Plays a majestic, detuned synth major chord for a 50-hit combo ("Impeccable").
+   * Blends triangle and sine waves with small frequency offsets for detuned chorus.
+   * Freqs: C5 (523Hz), E5 (659Hz), G5 (784Hz), C6 (1046Hz).
+   */
+  playImpeccableSound(): void {
+    if (!this.ctx || !this.isSoundEnabled()) return;
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime;
+
+    const freqs = [523.25, 659.25, 783.99, 1046.50];
+    freqs.forEach((freq, idx) => {
+      // Create two oscillators per note for detuned chorus effect
+      [freq - 2, freq + 2].forEach((f) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.type = idx % 2 === 0 ? "triangle" : "sine";
+        osc.frequency.setValueAtTime(f, t0);
+        
+        gain.gain.setValueAtTime(0.08, t0);
+        gain.gain.linearRampToValueAtTime(0.12, t0 + 0.05); // subtle swell
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+        
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.start(t0);
+        osc.stop(t0 + 0.5);
+        
+        osc.onended = () => {
+          osc.disconnect();
+          gain.disconnect();
+        };
+      });
+    });
+  }
+
   // ─── Miss Sound ──────────────────────────────────────────────────────────────
 
   /**
