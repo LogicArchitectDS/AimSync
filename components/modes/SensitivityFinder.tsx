@@ -34,7 +34,7 @@ export default function SensitivityFinder() {
     };
 
     return (
-        <div className="min-h-screen bg-[#050505] text-white p-6 md:p-12 relative overflow-hidden">
+        <div className="h-full w-full bg-[#050505] text-white p-6 md:p-12 pb-24 md:pb-32 relative overflow-y-auto">
 
             {/* Tactical Minimalist Background */}
             <div className="absolute inset-0 z-0 pointer-events-none opacity-20 bg-[linear-gradient(to_right,#ffffff0a_1px,transparent_1px),linear-gradient(to_bottom,#ffffff0a_1px,transparent_1px)] bg-[size:32px_32px]"></div>

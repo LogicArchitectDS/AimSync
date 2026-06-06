@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { BaseTarget, GameResult } from "@/lib/game/types";
 import { difficultyConfig, difficultyLabels, getScaledRadius, type Difficulty } from "@/lib/utils/drillConfig";
-import { calculateAccuracy, calculateAverageReactionTime, calculateBestReactionTime, getScaledCanvasCoordinates, isPointInsideTarget } from "@/lib/utils/gameMath";
+import { calculateAccuracy, calculateAverageReactionTime, calculateBestReactionTime, isPointInsideTarget } from "@/lib/utils/gameMath";
 import { useBaseGameEngine } from "@/lib/hooks/useBaseGameEngine";
 import SessionHUD from "@/components/SessionHUD";
 import ResultsScreen from "@/components/ResultsScreen";
@@ -26,7 +26,7 @@ export default function BlindFlick({ overrideSettings, onFinish }: BlindFlickPro
     // Mouse movement state tracking
     const lastMouseMoveTimeRef = useRef<number>(0);
     const isMouseMovingRef = useRef<boolean>(false);
-    const mousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+    const prevMousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
     
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
     const effectiveDifficulty = overrideSettings?.difficulty ?? difficulty;
@@ -35,7 +35,8 @@ export default function BlindFlick({ overrideSettings, onFinish }: BlindFlickPro
     const targetRef = useRef<BaseTarget | null>(null);
     const hasFlashedRef = useRef<boolean>(false);
     const flashTimeoutRef = useRef<number | null>(null);
-
+    const safetyTimeoutRef = useRef<number | null>(null);
+ 
     // Track state for the target's current visibility
     const [isTargetVisible, setIsTargetVisible] = useState<boolean>(false);
 
@@ -90,12 +91,15 @@ export default function BlindFlick({ overrideSettings, onFinish }: BlindFlickPro
     };
 
     const spawnTarget = useCallback(() => {
-        engine.clearAllTimersAndLoops();
+        if (safetyTimeoutRef.current) {
+            window.clearTimeout(safetyTimeoutRef.current);
+            safetyTimeoutRef.current = null;
+        }
         if (flashTimeoutRef.current) {
             window.clearTimeout(flashTimeoutRef.current);
             flashTimeoutRef.current = null;
         }
-
+ 
         const currentSession = engine.sessionIdxRef.current;
         const elapsedSec = (performance.now() - sessionStartRef.current) / 1000;
         const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, engine.duration);
@@ -107,12 +111,13 @@ export default function BlindFlick({ overrideSettings, onFinish }: BlindFlickPro
         setTarget(nextTarget);
         setIsTargetVisible(false);
         hasFlashedRef.current = false;
+        isMouseMovingRef.current = false;
         
         playPanningSound(nextTarget.x);
         engine.incrementSpawned();
-
+ 
         // Safety timeout in case they never move their mouse
-        engine.addTimeout(() => {
+        safetyTimeoutRef.current = window.setTimeout(() => {
             if (engine.sessionIdxRef.current !== currentSession) return;
             engine.incrementTimeoutMiss(config.missPenalty);
             spawnTarget();
@@ -140,44 +145,37 @@ export default function BlindFlick({ overrideSettings, onFinish }: BlindFlickPro
         prevPhaseRef.current = engine.phase;
     }, [engine.phase, spawnTarget]);
 
-    const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (engine.phase !== "live") return;
-        
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        
-        const { x, y } = getScaledCanvasCoordinates(e, canvas, engine.dimensions.width, engine.dimensions.height);
-        mousePosRef.current = { x, y };
-        
-        lastMouseMoveTimeRef.current = performance.now();
-        isMouseMovingRef.current = true;
-    };
-
     // Trigger hit scoring and spawn next target
     const handleHitSuccess = (targetVal: BaseTarget, reaction: number) => {
         engine.triggerHit(reaction);
         engine.incrementScore(config.scorePerHit + (engine.combo * 5));
-        spawnHitmarker(mousePosRef.current.x, mousePosRef.current.y);
+        spawnHitmarker(engine.mousePosRef.current.x, engine.mousePosRef.current.y);
         spawnTarget();
     };
-
+ 
     // Main game tick: monitors mouse stops and updates target flash state
     useEffect(() => {
         if (engine.phase !== "live") return;
-
+ 
         const checkMouseStop = () => {
             const now = performance.now();
             const currentTarget = targetRef.current;
-
+ 
+            const mx = engine.mousePosRef.current.x;
+            const my = engine.mousePosRef.current.y;
+ 
+            if (mx !== prevMousePosRef.current.x || my !== prevMousePosRef.current.y) {
+                isMouseMovingRef.current = true;
+                lastMouseMoveTimeRef.current = now;
+                prevMousePosRef.current = { x: mx, y: my };
+            }
+ 
             if (currentTarget && !hasFlashedRef.current) {
                 // If mouse has stopped moving for at least 100ms
                 if (isMouseMovingRef.current && (now - lastMouseMoveTimeRef.current > 100)) {
                     isMouseMovingRef.current = false;
                     hasFlashedRef.current = true;
-
-                    const mx = mousePosRef.current.x;
-                    const my = mousePosRef.current.y;
-
+ 
                     // 1. Check if crosshair is already on it at the stop instant (maximum reward)
                     if (isPointInsideTarget(mx, my, currentTarget.x, currentTarget.y, currentTarget.radius)) {
                         const reaction = now - currentTarget.spawnedAt;
@@ -185,7 +183,7 @@ export default function BlindFlick({ overrideSettings, onFinish }: BlindFlickPro
                     } else {
                         // 2. Otherwise flash target visually for 150ms
                         setIsTargetVisible(true);
-
+ 
                         flashTimeoutRef.current = window.setTimeout(() => {
                             setIsTargetVisible(false);
                             // If the flash window expires without action, it's a timeout miss
@@ -195,15 +193,18 @@ export default function BlindFlick({ overrideSettings, onFinish }: BlindFlickPro
                     }
                 }
             }
-
+ 
             engine.addAnimationFrame(checkMouseStop);
         };
-
+ 
         engine.addAnimationFrame(checkMouseStop);
         
         return () => {
             if (flashTimeoutRef.current) {
                 window.clearTimeout(flashTimeoutRef.current);
+            }
+            if (safetyTimeoutRef.current) {
+                window.clearTimeout(safetyTimeoutRef.current);
             }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -247,40 +248,27 @@ export default function BlindFlick({ overrideSettings, onFinish }: BlindFlickPro
                 ctx.shadowColor = "transparent";
                 ctx.shadowBlur = 0;
             }
-
-            // Draw crosshair
-            const mx = mousePosRef.current.x;
-            const my = mousePosRef.current.y;
-            ctx.strokeStyle = "rgba(0, 240, 255, 0.7)";
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(mx - 10, my);
-            ctx.lineTo(mx + 10, my);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(mx, my - 10);
-            ctx.lineTo(mx, my + 10);
-            ctx.stroke();
-
+ 
             engine.addAnimationFrame(render);
         };
-
+ 
         engine.addAnimationFrame(render);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [engine.phase, isTargetVisible]);
-
+ 
     const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
         if (engine.phase !== "live" || !target) return;
-
+ 
         const now = performance.now();
         if (now - lastClickTimeRef.current < 80) return;
         lastClickTimeRef.current = now;
-
+ 
         const canvas = canvasRef.current;
         if (!canvas) return;
-
-        const { x, y } = getScaledCanvasCoordinates(e, canvas, engine.dimensions.width, engine.dimensions.height);
-
+ 
+        const x = engine.mousePosRef.current.x;
+        const y = engine.mousePosRef.current.y;
+ 
         // Click is only allowed if target is currently visible (flashing)
         if (isTargetVisible && isPointInsideTarget(x, y, target.x, target.y, target.radius)) {
             if (flashTimeoutRef.current) {
@@ -291,7 +279,7 @@ export default function BlindFlick({ overrideSettings, onFinish }: BlindFlickPro
             handleHitSuccess(target, reaction);
             return;
         }
-
+ 
         // Otherwise it is a miss
         engine.triggerMiss(config.missPenalty, x, y, target.x, target.y);
     };
@@ -391,7 +379,6 @@ export default function BlindFlick({ overrideSettings, onFinish }: BlindFlickPro
                             ref={canvasRef}
                             width={engine.dimensions.width}
                             height={engine.dimensions.height}
-                            onMouseMove={handleCanvasMouseMove}
                             onMouseDown={handleCanvasMouseDown}
                             className="absolute inset-0 block cursor-none"
                         />

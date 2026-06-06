@@ -82,14 +82,44 @@ export const protocolCards: { id: Exclude<Mode, "menu">; category: string; title
     { id: "jiggle-peek", category: "Combat", title: "Jiggle Peek", desc: "Practice reaction discipline against peeking targets.", color: "#f43f5e" },
 ];
 
+function resolveModeKey(modeId: string | null): Exclude<Mode, "menu"> | null {
+    if (!modeId) return null;
+    const normalized = modeId.toLowerCase().replace(/_/g, "-");
+    
+    // Resolve known aliases/legacy configurations back to registry keys
+    if (normalized === "continuous-tracking" || normalized === "tracking-protocol" || normalized === "continuous-track") {
+        return "tracking-mode";
+    }
+    if (normalized === "micro-precision") {
+        return "micro-adjust";
+    }
+    if (normalized === "cognition-react") {
+        return "reaction-test";
+    }
+    if (normalized === "sound-spatialization-anchor" || normalized === "sound_spatialization_anchor") {
+        return "blind-flick";
+    }
+    if (normalized === "jasp-jiggle-peek" || normalized === "jasp_jiggle_peek") {
+        return "jiggle-peek";
+    }
+    if (normalized === "recoil-reactive-evasion" || normalized === "recoil_reactive_evasion") {
+        return "recoil-evasion";
+    }
+
+    if (normalized in ModeRegistry) {
+        return normalized as Exclude<Mode, "menu">;
+    }
+    return null;
+}
+
 function GameEngine() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const modeParam = searchParams.get("mode") as Exclude<Mode, "menu"> | null;
+    const modeParam = searchParams.get("mode");
     const diffParam = searchParams.get("diff");
     const timeParam = searchParams.get("time");
 
-    const currentMode = modeParam && ModeRegistry[modeParam] ? modeParam : null;
+    const currentMode = resolveModeKey(modeParam);
 
     const overrideSettings = React.useMemo(() => {
         if (!diffParam && !timeParam) return undefined;

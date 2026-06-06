@@ -149,24 +149,40 @@ export const StorageEngine = {
         
         switch (result.modeId) {
             case 'static-flick':
+            case 'flick-benchmark':
+            case 'blind-flick':
                 stats.xpFactors.precisionXp += primaryXp;
                 stats.xpFactors.flickingXp += secondaryXp;
                 break;
             case 'tracking-mode':
             case 'continuous-track':
+            case 'recoil-evasion':
+            case 'consistency-check':
                 stats.xpFactors.trackingXp += primaryXp;
                 stats.xpFactors.perceptionXp += secondaryXp;
                 break;
             case 'reaction-test':
+            case 'cognition-react':
                 stats.xpFactors.speedXp += primaryXp;
                 stats.xpFactors.perceptionXp += secondaryXp;
                 break;
             case 'target-switch':
+            case 'cognitive-overdrive':
                 stats.xpFactors.cognitionXp += primaryXp;
                 stats.xpFactors.flickingXp += secondaryXp;
                 break;
+            case 'micro-adjust':
             case 'micro-precision':
                 stats.xpFactors.precisionXp += primaryXp;
+                stats.xpFactors.flickingXp += secondaryXp;
+                break;
+            case 'burst-reaction':
+            case 'jiggle-peek':
+                stats.xpFactors.speedXp += primaryXp;
+                stats.xpFactors.flickingXp += secondaryXp;
+                break;
+            case 'echolocation':
+                stats.xpFactors.perceptionXp += primaryXp;
                 stats.xpFactors.flickingXp += secondaryXp;
                 break;
             default:

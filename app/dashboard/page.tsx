@@ -32,10 +32,40 @@ function getRankInfo(stats: UserStats) {
     return { tier: "Bronze", color: "text-orange-800", glow: "rgba(154,52,18,0.5)" };
 }
 
+const DIFFICULTIES = [
+    { value: 'eco', label: 'Eco' },
+    { value: 'bonus', label: 'Bonus' },
+    { value: 'force-buy', label: 'Force Buy' },
+    { value: 'full-buy', label: 'Full Buy' },
+];
+
+const DURATIONS = [
+    { value: 30, label: '30s' },
+    { value: 60, label: '60s' },
+    { value: 90, label: '90s' },
+    { value: 120, label: '120s' },
+];
+
 export default function DashboardPage() {
     const [stats, setStats] = useState<UserStats | null>(null);
     const [playlists, setPlaylists] = useState<CustomPlaylist[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+
+    const [sandboxSelections, setSandboxSelections] = useState<Record<string, { difficulty: string; duration: number }>>({});
+
+    const getSandboxSelection = (modeId: string) => {
+        return sandboxSelections[modeId] || { difficulty: 'bonus', duration: 60 };
+    };
+
+    const updateSandboxSelection = (modeId: string, key: 'difficulty' | 'duration', value: any) => {
+        setSandboxSelections(prev => ({
+            ...prev,
+            [modeId]: {
+                ...getSandboxSelection(modeId),
+                [key]: value
+            }
+        }));
+    };
     const [activeTab, setActiveTab] = useState<"training" | "heatmap">("training");
 
     const [dailyContract, setDailyContract] = useState<any>(null);
@@ -134,8 +164,8 @@ export default function DashboardPage() {
 
         const coreBases = [
             { mode: 'static-flick', name: 'Baseline: Flick', focus: 'raw speed' },
-            { mode: 'continuous-track', name: 'Baseline: Track', focus: 'reactivity' },
-            { mode: 'micro-precision', name: 'Baseline: Micro', focus: 'fine-motor control' }
+            { mode: 'tracking-mode', name: 'Baseline: Track', focus: 'reactivity' },
+            { mode: 'micro-adjust', name: 'Baseline: Micro', focus: 'fine-motor control' }
         ];
 
         const compulsoryTasks = coreBases.map((base, index) => {
@@ -155,9 +185,9 @@ export default function DashboardPage() {
 
         const randomPoolBases = [
             { mode: 'static-flick', name: 'Flick Endurance', focus: 'flick stamina' },
-            { mode: 'continuous-track', name: 'Tracking Overdrive', focus: 'smooth tracking' },
-            { mode: 'micro-precision', name: 'Needlepoint', focus: 'micro-adjustments' },
-            { mode: 'cognition-react', name: 'Cognitive Test', focus: 'decision making' }
+            { mode: 'tracking-mode', name: 'Tracking Overdrive', focus: 'smooth tracking' },
+            { mode: 'micro-adjust', name: 'Needlepoint', focus: 'micro-adjustments' },
+            { mode: 'reaction-test', name: 'Cognitive Test', focus: 'decision making' }
         ];
 
         const r1Index = dailySeed % randomPoolBases.length;
@@ -197,24 +227,28 @@ export default function DashboardPage() {
     // --- THE MATRIX GENERATOR (Sandbox) ---
     const baseModes = [
         { mode: 'static-flick', name: 'Static Flick', desc: 'Classic 3-target gridset.', category: 'Flicking', badgeColor: 'text-blue-400 border-blue-400/30 bg-blue-400/10' },
-        { mode: 'continuous-track', name: 'Orbital Tracking', desc: 'Erratic 3D drone tracking.', category: 'Tracking', badgeColor: 'text-orange-400 border-orange-400/30 bg-orange-400/10' },
-        { mode: 'micro-precision', name: 'Needlepoint', desc: 'Micro-target precision training.', category: 'Precision', badgeColor: 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10' },
-        { mode: 'cognition-react', name: 'Cognition Test', desc: 'Rapid target identification.', category: 'Cognition', badgeColor: 'text-purple-400 border-purple-400/30 bg-purple-400/10' }
+        { mode: 'tracking-mode', name: 'Continuous Tracking', desc: 'Continuous 3D target tracking.', category: 'Tracking', badgeColor: 'text-orange-400 border-orange-400/30 bg-orange-400/10' },
+        { mode: 'target-switch', name: 'Target Switch', desc: 'Rapidly identify and eliminate hostiles among decoys.', category: 'Cognition', badgeColor: 'text-purple-400 border-purple-400/30 bg-purple-400/10' },
+        { mode: 'burst-reaction', name: 'Burst Reaction', desc: 'Engage rapid target clusters to build combo multipliers.', category: 'Reflex', badgeColor: 'text-pink-500 border-pink-500/30 bg-pink-500/10' },
+        { mode: 'micro-adjust', name: 'Micro Adjust', desc: 'Micro-target pixel precision training.', category: 'Precision', badgeColor: 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10' },
+        { mode: 'reaction-test', name: 'Reaction Test', desc: 'Pure neurological stimulus response testing.', category: 'Reflex', badgeColor: 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10' },
+        { mode: 'flick-benchmark', name: 'Flick Benchmark', desc: 'Standardized testing protocol to rank flicking accuracy.', category: 'Evaluation', badgeColor: 'text-pink-400 border-pink-400/30 bg-pink-400/10' },
+        { mode: 'consistency-check', name: 'Consistency Check', desc: 'Test variance in performance over prolonged engagements.', category: 'Evaluation', badgeColor: 'text-violet-500 border-violet-500/30 bg-violet-500/10' },
+        { mode: 'echolocation', name: 'Echolocation', desc: 'Rely on spatial audio to snap to targets behind you.', category: 'Perception', badgeColor: 'text-cyan-400 border-cyan-400/30 bg-cyan-400/10' },
+        { mode: 'cognitive-overdrive', name: 'Cognitive Overdrive', desc: 'Target discrimination: shoot hostiles and avoid distractors.', category: 'Cognition', badgeColor: 'text-blue-500 border-blue-500/30 bg-blue-500/10' },
+        { mode: 'recoil-evasion', name: 'Recoil Evasion', desc: 'Counteract weapon recoil while tracking an evasive target.', category: 'Tracking', badgeColor: 'text-red-400 border-red-400/30 bg-red-400/10' },
+        { mode: 'blind-flick', name: 'Blind Flick', desc: 'Acquire targets in a dark void using spatial audio pans.', category: 'Perception', badgeColor: 'text-indigo-400 border-indigo-400/30 bg-indigo-400/10' },
+        { mode: 'jiggle-peek', name: 'Jiggle Peek', desc: 'Practice reaction discipline against peeking targets.', category: 'Combat', badgeColor: 'text-rose-400 border-rose-400/30 bg-rose-400/10' }
     ];
 
     const trainingProtocols = useMemo(() => {
-        const allDifficulties = ['Eco', 'Bonus', 'Force Buy', 'Full Buy'];
-        return baseModes.flatMap(base =>
-            allDifficulties.map(diff => ({
-                ...base,
-                uid: `${base.mode}-${diff.toLowerCase().replace(' ', '-')}`,
-                difficulty: diff,
-                highScore: stats?.modes?.[base.mode]?.highScore || 0,
-                avgAcc: stats?.modes?.[base.mode]?.averageAccuracy || 0,
-                gamesPlayed: stats?.modes?.[base.mode]?.gamesPlayed || 0,
-                timePlayedSeconds: stats?.modes?.[base.mode]?.timePlayedSeconds || 0,
-            }))
-        );
+        return baseModes.map(base => ({
+            ...base,
+            highScore: stats?.modes?.[base.mode]?.highScore || 0,
+            avgAcc: stats?.modes?.[base.mode]?.averageAccuracy || 0,
+            gamesPlayed: stats?.modes?.[base.mode]?.gamesPlayed || 0,
+            timePlayedSeconds: stats?.modes?.[base.mode]?.timePlayedSeconds || 0,
+        }));
     }, [stats]);
 
     // XP Factor bar helper (normalise to 0–100 relative to the highest factor)
@@ -316,7 +350,7 @@ export default function DashboardPage() {
                                 <div className="flex flex-col gap-1.5 md:col-span-2">
                                     <span className="text-[10px] font-black tracking-widest text-slate-500 uppercase">Exercise Mode</span>
                                     <select className="bg-black/50 text-white text-xs p-2.5 rounded-lg border border-white/10 focus:outline-none focus:border-blue-500 font-bold transition-all h-[38px] cursor-pointer" value={selectedMode} onChange={(e) => setSelectedMode(e.target.value)}>
-                                        {baseModes.map(m => <option key={m.mode} value={m.mode}>{m.name}</option>)}
+                                        {baseModes.filter(m => m.mode !== 'sensitivity-finder').map(m => <option key={m.mode} value={m.mode}>{m.name}</option>)}
                                     </select>
                                 </div>
                                 <div className="flex flex-col gap-1.5">
@@ -564,6 +598,37 @@ export default function DashboardPage() {
                         )}
                     </div>
 
+                    {/* SENSITIVITY FINDER DIAGNOSTIC PROTOCOL */}
+                    <div className="bg-[#120b1e]/85 border border-purple-500/20 p-6 rounded-xl backdrop-blur-md relative overflow-hidden shadow-[0_0_30px_rgba(168,85,247,0.1)] mb-6">
+                        {/* Glowing accent border */}
+                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-purple-500 via-violet-400 to-transparent" />
+                        <div className="absolute -top-24 -right-24 w-64 h-64 bg-purple-500/10 rounded-full blur-[80px] pointer-events-none" />
+
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+                            <div className="flex items-start gap-4">
+                                <div className="p-3 bg-purple-500/10 rounded-lg text-purple-400 border border-purple-500/20 shrink-0">
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="px-2 py-0.5 text-[9px] font-black tracking-widest text-purple-400 bg-purple-400/10 rounded border border-purple-500/30 uppercase">SYSTEM DIAGNOSTIC</span>
+                                    </div>
+                                    <h2 className="text-white font-black text-lg uppercase tracking-wider mt-1">Sensitivity Finder</h2>
+                                    <p className="text-slate-400 text-xs mt-0.5">Calibrate and calculate your mathematically optimal mouse sensitivity using variant calibration drills.</p>
+                                </div>
+                            </div>
+                            
+                            <button
+                                onClick={() => router.push('/game?mode=sensitivity-finder')}
+                                className="px-6 py-3 bg-gradient-to-r from-purple-600 to-violet-500 hover:brightness-110 text-white text-[11px] font-black uppercase tracking-widest rounded-lg transition-all shadow-[0_0_20px_rgba(168,85,247,0.4)] whitespace-nowrap"
+                            >
+                                Launch Finder
+                            </button>
+                        </div>
+                    </div>
+
                     {/* BOX 1: ACTIVE OPERATIONS */}
                     <div className="bg-surface/60 border border-white/10 p-6 rounded-xl backdrop-blur-md relative overflow-hidden">
                         {/* Background glow effect for the panel */}
@@ -732,23 +797,100 @@ export default function DashboardPage() {
                             <div><h2 className="text-white font-black text-lg uppercase tracking-widest">Task Repository</h2><p className="text-slate-400 text-sm">Open training sandbox (No time limits)</p></div>
                         </div>
                         <div className="grid grid-cols-12 gap-4 pb-3 border-b border-white/10 text-[10px] font-black tracking-[0.2em] uppercase text-slate-500 px-4">
-                            <div className="col-span-3">Scenario Name</div><div className="col-span-2 text-center">Category</div><div className="col-span-1 text-center">Diff</div><div className="col-span-2 text-center">Plays / Time</div><div className="col-span-2 text-right">High Score</div><div className="col-span-2 text-right">Avg Acc</div>
+                            <div className="col-span-3">Scenario Name</div>
+                            <div className="col-span-2 text-center">Category</div>
+                            <div className="col-span-1 text-right">High Score</div>
+                            <div className="col-span-1 text-right">Avg Acc</div>
+                            <div className="col-span-2 text-center">Difficulty</div>
+                            <div className="col-span-2 text-center">Duration</div>
+                            <div className="col-span-1" />
                         </div>
                         <div className="flex flex-col mt-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
-                            {trainingProtocols.map((protocol) => (
-                                <div 
-                                    key={protocol.uid} 
-                                    className={`grid grid-cols-12 gap-4 py-4 px-4 items-center border-b border-white/5 transition-colors group ${isContractActive ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/[0.02] cursor-pointer'}`} 
-                                    onClick={isContractActive ? () => alert("Daily Contract Active! Please complete or abandon your current contract to access the sandbox.") : () => router.push(`/game?mode=${protocol.mode}&time=0&diff=${protocol.difficulty}`)}
-                                >
-                                    <div className="col-span-3 flex flex-col"><span className="text-white font-bold text-sm tracking-wide group-hover:text-[#3366FF] transition-colors truncate">{protocol.name}</span><span className="text-slate-500 text-[10px] truncate pr-2">{protocol.desc}</span></div>
-                                    <div className="col-span-2 flex justify-center"><span className={`px-2 py-1 text-[9px] font-black uppercase tracking-widest border rounded-sm ${protocol.badgeColor}`}>{protocol.category}</span></div>
-                                    <div className="col-span-1 flex justify-center"><span className="px-2 py-1 text-[9px] font-mono text-slate-300 bg-white/5 border border-white/10 rounded truncate">{protocol.difficulty}</span></div>
-                                    <div className="col-span-2 flex flex-col items-center"><span className="text-white font-mono text-xs">{protocol.gamesPlayed}</span><span className="text-slate-500 text-[10px]">{formatTime(protocol.timePlayedSeconds)}</span></div>
-                                    <div className="col-span-2 text-right"><span className="text-white font-mono text-sm font-bold">{protocol.highScore > 0 ? Math.round(protocol.highScore).toLocaleString() : '--'}</span></div>
-                                    <div className="col-span-2 text-right"><span className="text-emerald-400 font-mono text-sm font-bold">{protocol.avgAcc > 0 ? `${protocol.avgAcc.toFixed(1)}%` : '--'}</span></div>
-                                </div>
-                            ))}
+                            {trainingProtocols.map((protocol) => {
+                                const selection = getSandboxSelection(protocol.mode);
+                                return (
+                                    <div 
+                                        key={protocol.mode} 
+                                        className={`grid grid-cols-12 gap-4 py-4 px-4 items-center border-b border-white/5 transition-colors group ${isContractActive ? 'opacity-40' : 'hover:bg-white/[0.02]'}`}
+                                    >
+                                        <div className="col-span-3 flex flex-col">
+                                            <span className="text-white font-bold text-sm tracking-wide group-hover:text-[#3366FF] transition-colors truncate">
+                                                {protocol.name}
+                                            </span>
+                                            <span className="text-slate-500 text-[10px] truncate pr-2 mt-0.5">
+                                                {protocol.desc}
+                                            </span>
+                                        </div>
+                                        <div className="col-span-2 flex flex-col items-center gap-1">
+                                            <span className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-widest border rounded-sm ${protocol.badgeColor}`}>
+                                                {protocol.category}
+                                            </span>
+                                            <span className="text-slate-500 text-[9px] font-mono whitespace-nowrap">
+                                                {protocol.gamesPlayed} plays · {formatTime(protocol.timePlayedSeconds)}
+                                            </span>
+                                        </div>
+                                        <div className="col-span-1 text-right">
+                                            <span className="text-white font-mono text-sm font-bold">
+                                                {protocol.highScore > 0 ? Math.round(protocol.highScore).toLocaleString() : '--'}
+                                            </span>
+                                        </div>
+                                        <div className="col-span-1 text-right">
+                                            <span className="text-emerald-400 font-mono text-sm font-bold">
+                                                {protocol.avgAcc > 0 ? `${protocol.avgAcc.toFixed(1)}%` : '--'}
+                                            </span>
+                                        </div>
+                                        <div className="col-span-2 flex justify-center px-1">
+                                            <select
+                                                disabled={isContractActive}
+                                                value={selection.difficulty}
+                                                onChange={(e) => updateSandboxSelection(protocol.mode, 'difficulty', e.target.value)}
+                                                className="w-full bg-black/60 border border-white/10 hover:border-white/20 text-[10px] font-bold text-slate-300 rounded-md px-2 py-1.5 cursor-pointer focus:outline-none focus:border-[#3366FF] transition-all text-center"
+                                            >
+                                                {DIFFICULTIES.map(opt => (
+                                                    <option key={opt.value} value={opt.value}>
+                                                        {opt.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="col-span-2 flex justify-center px-1">
+                                            <select
+                                                disabled={isContractActive}
+                                                value={selection.duration}
+                                                onChange={(e) => updateSandboxSelection(protocol.mode, 'duration', Number(e.target.value))}
+                                                className="w-full bg-black/60 border border-white/10 hover:border-white/20 text-[10px] font-bold text-slate-300 rounded-md px-2 py-1.5 cursor-pointer focus:outline-none focus:border-[#3366FF] transition-all text-center"
+                                            >
+                                                {DURATIONS.map(opt => (
+                                                    <option key={opt.value} value={opt.value}>
+                                                        {opt.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="col-span-1 flex justify-end">
+                                            <button
+                                                disabled={isContractActive}
+                                                onClick={() => {
+                                                    if (isContractActive) {
+                                                        alert("Daily Contract Active! Please complete or abandon your current contract to access the sandbox.");
+                                                        return;
+                                                    }
+                                                    router.push(`/game?mode=${protocol.mode}&time=${selection.duration}&diff=${selection.difficulty}`);
+                                                }}
+                                                className={`p-2 rounded-lg text-[#3366FF] border border-[#3366FF]/30 transition-all transform hover:scale-105 ${
+                                                    isContractActive 
+                                                        ? 'bg-white/5 border-white/5 text-slate-600 cursor-not-allowed'
+                                                        : 'bg-[#3366FF]/10 hover:bg-[#3366FF] hover:text-white hover:border-[#3366FF]'
+                                                }`}
+                                            >
+                                                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                                                    <path d="M8 5v14l11-7z" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                         </>

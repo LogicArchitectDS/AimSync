@@ -1,5 +1,5 @@
 "use client";
-
+ 
 import { useState } from "react";
 import type { Routine, GameResult } from "@/lib/game/types";
 import StaticFlick from "./StaticFlick";
@@ -7,8 +7,16 @@ import TrackingMode from "./TrackingMode";
 import MicroAdjust from "./MicroAdjust";
 import TargetSwitch from "./TargetSwitch";
 import BurstReaction from "./BurstReaction";
+import FlickBenchmark from "./FlickBenchmark";
+import ReactionTest from "./ReactionTest";
+import ConsistencyCheck from "./ConsistencyCheck";
+import Echolocation from "./Echolocation";
+import CognitiveOverdrive from "./CognitiveOverdrive";
+import RecoilReactiveEvasion from "./RecoilReactiveEvasion";
+import BlindFlick from "./BlindFlick";
+import JigglePeek from "./JigglePeek";
 import type { Difficulty } from "@/lib/utils/drillConfig";
-
+ 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ModeMap: Record<string, React.ComponentType<any>> = {
     "static-flick": StaticFlick,
@@ -16,6 +24,14 @@ const ModeMap: Record<string, React.ComponentType<any>> = {
     "micro-adjust": MicroAdjust,
     "target-switch": TargetSwitch,
     "burst-reaction": BurstReaction,
+    "flick-benchmark": FlickBenchmark,
+    "reaction-test": ReactionTest,
+    "consistency-check": ConsistencyCheck,
+    "echolocation": Echolocation,
+    "cognitive-overdrive": CognitiveOverdrive,
+    "recoil-evasion": RecoilReactiveEvasion,
+    "blind-flick": BlindFlick,
+    "jiggle-peek": JigglePeek,
 };
 
 interface OverrideSettings {

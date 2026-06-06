@@ -11,11 +11,19 @@ interface CustomRoutineProps {
 }
 
 const AVAILABLE_MODULES: { modeId: string; name: string }[] = [
-    { modeId: "static-flick",   name: "Static Flick" },
-    { modeId: "tracking-mode",  name: "Continuous Tracking" },
-    { modeId: "target-switch",  name: "Target Switch" },
-    { modeId: "micro-adjust",   name: "Micro Adjust" },
-    { modeId: "burst-reaction", name: "Burst Reaction" },
+    { modeId: "static-flick",        name: "Static Flick" },
+    { modeId: "tracking-mode",       name: "Continuous Tracking" },
+    { modeId: "target-switch",       name: "Target Switch" },
+    { modeId: "burst-reaction",      name: "Burst Reaction" },
+    { modeId: "micro-adjust",        name: "Micro Adjust" },
+    { modeId: "reaction-test",       name: "Reaction Test" },
+    { modeId: "flick-benchmark",     name: "Flick Benchmark" },
+    { modeId: "consistency-check",   name: "Consistency Check" },
+    { modeId: "echolocation",        name: "Echolocation" },
+    { modeId: "cognitive-overdrive", name: "Cognitive Overdrive" },
+    { modeId: "recoil-evasion",      name: "Recoil Evasion" },
+    { modeId: "blind-flick",         name: "Blind Flick" },
+    { modeId: "jiggle-peek",         name: "Jiggle Peek" },
 ];
 
 const DIFFICULTY_OPTIONS: { key: Difficulty; label: string }[] = [
