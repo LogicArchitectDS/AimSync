@@ -8,6 +8,7 @@ import type { UserStats, CustomPlaylist, PlaylistTask } from "@/lib/game/types";
 import dynamic from 'next/dynamic';
 import { RoutineDirector } from "@/lib/services/routineDirector";
 import MuscleMemoryHeatmap from "@/components/MuscleMemoryHeatmap";
+import ProMarketplace from "@/components/dashboard/ProMarketplace";
 
 const RadarProfiler = dynamic(() => import('@/components/RadarProfiler'), {
     ssr: false,
@@ -66,7 +67,7 @@ export default function DashboardPage() {
             }
         }));
     };
-    const [activeTab, setActiveTab] = useState<"training" | "heatmap">("training");
+    const [activeTab, setActiveTab] = useState<"training" | "heatmap" | "pro-playlists">("training");
 
     const [dailyContract, setDailyContract] = useState<any>(null);
     const [isContractActive, setIsContractActive] = useState(false);
@@ -509,6 +510,16 @@ export default function DashboardPage() {
                         >
                             Muscle Memory Heatmap
                         </button>
+                        <button
+                            onClick={() => setActiveTab("pro-playlists")}
+                            className={`px-5 py-2.5 text-xs font-black uppercase tracking-widest transition-all border-b-2 ${
+                                activeTab === "pro-playlists"
+                                    ? "border-[#3366FF] text-white shadow-[0_4px_12px_rgba(51,102,255,0.15)]"
+                                    : "border-transparent text-slate-500 hover:text-slate-300"
+                            }`}
+                        >
+                            Pro Marketplace
+                        </button>
                     </div>
 
                     {activeTab === "training" ? (
@@ -894,8 +905,10 @@ export default function DashboardPage() {
                         </div>
                     </div>
                         </>
-                    ) : (
+                    ) : activeTab === "heatmap" ? (
                         <MuscleMemoryHeatmap safeStats={safeStats} />
+                    ) : (
+                        <ProMarketplace />
                     )}
 
                     {/* STAT GRID */}

@@ -1,7 +1,9 @@
 "use client";
- 
-import { useState } from "react";
+
+import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import type { Routine, GameResult } from "@/lib/game/types";
+import { proPlaylists } from "@/lib/config/proPlaylists";
 import StaticFlick from "./StaticFlick";
 import TrackingMode from "./TrackingMode";
 import MicroAdjust from "./MicroAdjust";
@@ -16,7 +18,7 @@ import RecoilReactiveEvasion from "./RecoilReactiveEvasion";
 import BlindFlick from "./BlindFlick";
 import JigglePeek from "./JigglePeek";
 import type { Difficulty } from "@/lib/utils/drillConfig";
- 
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ModeMap: Record<string, React.ComponentType<any>> = {
     "static-flick": StaticFlick,
@@ -39,12 +41,78 @@ interface OverrideSettings {
     difficulty: Difficulty;
 }
 
+function resolveModeKey(modeId: string): string {
+    const normalized = modeId.toLowerCase().replace(/_/g, "-");
+    if (
+        normalized === "continuous-tracking" ||
+        normalized === "tracking-protocol" ||
+        normalized === "continuous-track" ||
+        normalized === "tracking-while-moving" ||
+        normalized === "smoothness-track"
+    ) {
+        return "tracking-mode";
+    }
+    if (normalized === "micro-precision") {
+        return "micro-adjust";
+    }
+    if (normalized === "vertical-flick" || normalized === "spatial-flick") {
+        return "static-flick";
+    }
+    if (normalized === "flick-track-hybrid") {
+        return "target-switch";
+    }
+    if (
+        normalized === "recoil-reactive-evasion" ||
+        normalized === "recoil_reactive_evasion" ||
+        normalized === "recoil-reactive" ||
+        normalized === "recoil-evasion"
+    ) {
+        return "recoil-evasion";
+    }
+    return normalized;
+}
+
 export default function RoutineRunner({ routine, onComplete }: { routine: Routine; onComplete: () => void }) {
+    const searchParams = useSearchParams();
+    const playlistParam = searchParams.get("playlist");
+
+    const [activeRoutine, setActiveRoutine] = useState<Routine>(routine);
     const [stepIndex, setStepIndex] = useState(0);
     const [isIntermission, setIsIntermission] = useState(false);
     const [lastResult, setLastResult] = useState<GameResult | null>(null);
 
-    const currentStep = routine.drills[stepIndex];
+    // Ingest playlist from URL query parameters if present, overriding baseline routine
+    useEffect(() => {
+        if (playlistParam) {
+            const proPlaylist = proPlaylists.find((p) => p.id === playlistParam);
+            if (proPlaylist) {
+                const difficultyMap: Record<string, string> = {
+                    "Eco": "easy",
+                    "Bonus": "medium",
+                    "Force Buy": "hard",
+                    "Full Buy": "extreme",
+                };
+                const compiled: Routine = {
+                    id: proPlaylist.id,
+                    name: `${proPlaylist.proName}'s Regimen`,
+                    description: proPlaylist.description,
+                    authorId: proPlaylist.creatorType,
+                    createdAt: new Date().toISOString(),
+                    drills: proPlaylist.sequence.map((task, idx) => ({
+                        id: `${proPlaylist.id}-drill-${idx}-${Date.now()}`,
+                        modeId: resolveModeKey(task.modeId),
+                        difficulty: difficultyMap[task.difficulty] || "medium",
+                        durationSeconds: task.duration,
+                    })),
+                };
+                setActiveRoutine(compiled);
+            }
+        } else {
+            setActiveRoutine(routine);
+        }
+    }, [playlistParam, routine]);
+
+    const currentStep = activeRoutine.drills[stepIndex];
     const CurrentModeComponent = ModeMap[currentStep?.modeId];
 
     const handleDrillComplete = (result: GameResult) => {
@@ -52,7 +120,7 @@ export default function RoutineRunner({ routine, onComplete }: { routine: Routin
         setIsIntermission(true);
 
         setTimeout(() => {
-            if (stepIndex < routine.drills.length - 1) {
+            if (stepIndex < activeRoutine.drills.length - 1) {
                 setStepIndex((prev) => prev + 1);
                 setIsIntermission(false);
             } else {
@@ -67,8 +135,8 @@ export default function RoutineRunner({ routine, onComplete }: { routine: Routin
     };
 
     if (isIntermission) {
-        const nextStep = routine.drills[stepIndex + 1];
-        const isLast = stepIndex >= routine.drills.length - 1;
+        const nextStep = activeRoutine.drills[stepIndex + 1];
+        const isLast = stepIndex >= activeRoutine.drills.length - 1;
 
         return (
             <div className="flex flex-col items-center justify-center h-screen bg-[#121212] space-y-6">
@@ -87,7 +155,7 @@ export default function RoutineRunner({ routine, onComplete }: { routine: Routin
 
                 <div className="p-8 border border-white/10 bg-black/40 rounded-2xl text-center min-w-[280px]">
                     <p className="text-gray-400 mb-2 uppercase text-xs font-bold">
-                        {isLast ? "Routine Complete" : `Next Up — Drill ${stepIndex + 2} / ${routine.drills.length}`}
+                        {isLast ? "Routine Complete" : `Next Up — Drill ${stepIndex + 2} / ${activeRoutine.drills.length}`}
                     </p>
                     <p className="text-2xl font-bold text-white uppercase">
                         {isLast ? "🏁 All Done!" : nextStep.modeId.replace(/-/g, " ")}

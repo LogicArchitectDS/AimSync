@@ -63,7 +63,12 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
                     // The Death Lock: Prevents ghost-spawns
                     if (!hitObject.userData.isDead) {
                         hitObject.userData.isDead = true;
-                        recordHit(10);
+                        if (hitObject.userData.isFriendly) {
+                            // Friendly target hit: instantly reset player combo
+                            recordMiss();
+                        } else {
+                            recordHit(10);
+                        }
                         if (hitObject.userData.onHit) {
                             hitObject.userData.onHit(hitObject.userData.id);
                         }
@@ -84,12 +89,21 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
             <directionalLight position={[10, 10, 10]} intensity={1} />
 
             {/* Render the correct manager based on activeMode */}
-            {activeMode === 'static-flick' && <TargetManager targetScale={targetScale} />}
-            {activeMode === 'continuous-track' && <TrackingManager targetScale={targetScale} />}
+            {(activeMode === 'static-flick' || activeMode === 'echolocation' || activeMode === 'cognitive-overdrive') && (
+                <TargetManager targetScale={targetScale} activeMode={activeMode} />
+            )}
+            {(activeMode === 'continuous-track' || activeMode === 'recoil-reactive' || activeMode === 'recoil-evasion') && (
+                <TrackingManager targetScale={targetScale} activeMode={activeMode} />
+            )}
 
             {/* Fallback if mode isn't built yet */}
-            {activeMode !== 'static-flick' && activeMode !== 'continuous-track' && (
-                <TargetManager targetScale={targetScale} />
+            {activeMode !== 'static-flick' && 
+             activeMode !== 'echolocation' && 
+             activeMode !== 'cognitive-overdrive' && 
+             activeMode !== 'continuous-track' && 
+             activeMode !== 'recoil-reactive' && 
+             activeMode !== 'recoil-evasion' && (
+                <TargetManager targetScale={targetScale} activeMode={activeMode} />
             )}
 
             {activeWeapon && <WeaponModel weaponType={activeWeapon?.type || 'pistol'} />}

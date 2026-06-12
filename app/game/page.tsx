@@ -24,6 +24,8 @@ import BlindFlick from "@/components/modes/BlindFlick";
 import JigglePeek from "@/components/modes/JigglePeek";
 import { DEFAULT_ROUTINES } from "@/lib/utils/routineEngine";
 import { Difficulty } from "@/lib/utils/drillConfig";
+import { proPlaylists } from "@/lib/config/proPlaylists";
+import type { Routine } from "@/lib/game/types";
 
 export type Mode =
     | "menu"
@@ -87,11 +89,23 @@ function resolveModeKey(modeId: string | null): Exclude<Mode, "menu"> | null {
     const normalized = modeId.toLowerCase().replace(/_/g, "-");
     
     // Resolve known aliases/legacy configurations back to registry keys
-    if (normalized === "continuous-tracking" || normalized === "tracking-protocol" || normalized === "continuous-track") {
+    if (
+        normalized === "continuous-tracking" ||
+        normalized === "tracking-protocol" ||
+        normalized === "continuous-track" ||
+        normalized === "tracking-while-moving" ||
+        normalized === "smoothness-track"
+    ) {
         return "tracking-mode";
     }
     if (normalized === "micro-precision") {
         return "micro-adjust";
+    }
+    if (normalized === "vertical-flick" || normalized === "spatial-flick") {
+        return "static-flick";
+    }
+    if (normalized === "flick-track-hybrid") {
+        return "target-switch";
     }
     if (normalized === "cognition-react") {
         return "reaction-test";
@@ -102,7 +116,11 @@ function resolveModeKey(modeId: string | null): Exclude<Mode, "menu"> | null {
     if (normalized === "jasp-jiggle-peek" || normalized === "jasp_jiggle_peek") {
         return "jiggle-peek";
     }
-    if (normalized === "recoil-reactive-evasion" || normalized === "recoil_reactive_evasion") {
+    if (
+        normalized === "recoil-reactive-evasion" ||
+        normalized === "recoil_reactive_evasion" ||
+        normalized === "recoil-reactive"
+    ) {
         return "recoil-evasion";
     }
 
@@ -118,8 +136,42 @@ function GameEngine() {
     const modeParam = searchParams.get("mode");
     const diffParam = searchParams.get("diff");
     const timeParam = searchParams.get("time");
+    const playlistParam = searchParams.get("playlist");
 
     const currentMode = resolveModeKey(modeParam);
+
+    // Resolve playlist if parameter exists
+    const proPlaylist = React.useMemo(() => {
+        if (!playlistParam) return null;
+        return proPlaylists.find((p) => p.id === playlistParam) || null;
+    }, [playlistParam]);
+
+    const compiledRoutine = React.useMemo(() => {
+        if (!proPlaylist) return null;
+
+        const difficultyMap: Record<string, string> = {
+            "Eco": "easy",
+            "Bonus": "medium",
+            "Force Buy": "hard",
+            "Full Buy": "extreme",
+        };
+
+        const routine: Routine = {
+            id: proPlaylist.id,
+            name: `${proPlaylist.proName}'s Regimen`,
+            description: proPlaylist.description,
+            authorId: proPlaylist.creatorType,
+            createdAt: new Date().toISOString(),
+            drills: proPlaylist.sequence.map((task, idx) => ({
+                id: `${proPlaylist.id}-drill-${idx}-${Date.now()}`,
+                modeId: resolveModeKey(task.modeId) || task.modeId,
+                difficulty: difficultyMap[task.difficulty] || "medium",
+                durationSeconds: task.duration,
+            })),
+        };
+
+        return routine;
+    }, [proPlaylist]);
 
     const overrideSettings = React.useMemo(() => {
         if (!diffParam && !timeParam) return undefined;
@@ -139,6 +191,32 @@ function GameEngine() {
         };
     }, [diffParam, timeParam]);
 
+    const handleModeFinish = () => {
+        if (document.fullscreenElement) {
+            document.exitFullscreen().catch((err) => {
+                console.warn("Could not exit fullscreen naturally:", err);
+            });
+        }
+        router.push("/dashboard");
+    };
+
+    if (compiledRoutine) {
+        return (
+            <div className="relative w-full h-screen bg-[#121212] overflow-hidden">
+                <button
+                    onClick={handleModeFinish}
+                    className="absolute bottom-6 right-6 z-[100] px-4 py-2 bg-black/50 border border-white/10 rounded text-xs font-bold tracking-widest text-gray-400 hover:text-white hover:border-white/30 transition-all backdrop-blur-md"
+                >
+                    ABORT TO HUB
+                </button>
+                <RoutineRunner
+                    routine={compiledRoutine}
+                    onComplete={handleModeFinish}
+                />
+            </div>
+        );
+    }
+
     if (!currentMode) {
         return (
             <div className="flex flex-col items-center justify-center h-screen bg-[#121212] text-white space-y-4">
@@ -154,17 +232,6 @@ function GameEngine() {
     }
 
     const ActiveComponent = ModeRegistry[currentMode];
-
-
-
-    const handleModeFinish = () => {
-        if (document.fullscreenElement) {
-            document.exitFullscreen().catch((err) => {
-                console.warn("Could not exit fullscreen naturally:", err);
-            });
-        }
-        router.push("/dashboard");
-    };
 
     return (
         <div className="relative w-full h-screen bg-[#121212] overflow-hidden">
