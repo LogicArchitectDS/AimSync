@@ -191,7 +191,7 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
         const canvas = engine.canvasRef.current;
         if (!canvas) return;
 
-        const { x, y } = getScaledCanvasCoordinates(event, canvas, engine.dimensions.width, engine.dimensions.height);
+        const { x, y } = getScaledCanvasCoordinates(event, canvas, engine.dimensions.width, engine.dimensions.height, engine.mousePosRef.current);
 
         if (isPointInsideTarget(x, y, target.x, target.y, target.radius)) {
             if (target.id === lastHitTargetIdRef.current) return;

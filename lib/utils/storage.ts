@@ -132,16 +132,19 @@ export const StorageEngine = {
         stats.globalAccuracy = totalTrackedPlays > 0 ? (globalAcc / totalTrackedPlays) : 0;
         stats.lastPlayedAt = new Date().toISOString();
 
-        // Calculate XP
+                // Calculate XP
         const sessionXp = result.score * 10;
-        stats.xp = (stats.xp || 0) + sessionXp;
+        const isTrial = typeof window !== 'undefined' && (localStorage.getItem("aimsync_trial_active") === "true" || localStorage.getItem("aimsync_session")?.includes('"isTrial":true'));
+        if (!isTrial) {
+            stats.xp = (stats.xp || 0) + sessionXp;
 
-        // Level up formula (500 * level^2)
-        let currentLevel = stats.level || 1;
-        while (stats.xp >= Math.pow(currentLevel, 2) * 500) {
-            currentLevel++;
+            // Level up formula (500 * level^2)
+            let currentLevel = stats.level || 1;
+            while (stats.xp >= Math.pow(currentLevel, 2) * 500) {
+                currentLevel++;
+            }
+            stats.level = currentLevel;
         }
-        stats.level = currentLevel;
 
         // Distribute XP into factors
         const primaryXp = Math.floor(sessionXp * 0.70);

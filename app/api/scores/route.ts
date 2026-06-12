@@ -74,13 +74,6 @@ export async function GET(request: Request) {
 
 // --- POST: Save telemetry, process level-up, milestone check and atomic write to Cloudflare D1 ---
 export async function POST(request: Request) {
-    // 1. Session Guarding: Ensure user is logged in
-    const session = await auth();
-    if (!session || !session.user || !session.user.id) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const userId = session.user.id;
-
     // Parse and normalize the incoming payload
     let body: any;
     try {
@@ -88,6 +81,25 @@ export async function POST(request: Request) {
     } catch {
         return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }
+
+    // 1. Session Guarding: Ensure user is logged in (and not a trial guest)
+    const session = await auth();
+    const isTrialUser = body.isTrial === true || !session || !session.user || !session.user.id || session.user.id === 'guest' || session.user.id === 'trial' || session.user.id === 'local';
+
+    if (isTrialUser || !session || !session.user || !session.user.id) {
+        // Return a mock response, short-circuiting database execution and leveling triggers
+        return NextResponse.json({
+            success: true,
+            xpEarned: 0,
+            levelUp: false,
+            currentLevel: 1,
+            currentXp: 0,
+            xpNeededForNext: 500,
+            mocked: true
+        });
+    }
+
+    const userId = session.user.id;
 
     if (body.stats) {
         const db = await getDb();
@@ -136,19 +148,24 @@ export async function POST(request: Request) {
     const missQuadrants         = body.missQuadrants || body.miss_quadrants || null;
 
     const totalTargets = hits + misses;
-    const accuracy = totalTargets > 0 ? (hits / totalTargets) * 100 : 0;
+    const accuracyFraction = totalTargets > 0 ? (hits / totalTargets) : 0;
+    const accuracy = accuracyFraction * 100;
 
     // 2. Input Anti-Cheat Validation
     const inputVelocity = durationSeconds > 0 ? (totalTargets / durationSeconds) : 0;
     let integrityFlag = 'HIGH_INTEGRITY';
     let xpEarned = 0;
-    const baseXp = (hits * 10) + (maxCombo * 5);
+    
+    // XP Delta = Base Run Fee (100) + (Score / 10) * (Accuracy > 0.90 ? 1.5 : 1.0)
+    const score = typeof body.score === 'number' ? body.score : (body.rawScoreData?.score ?? (hits * 10 + maxCombo * 5));
+    const accuracyMultiplier = accuracyFraction > 0.90 ? 1.5 : 1.0;
+    const baseXp = 100 + (score / 10) * accuracyMultiplier;
 
     if (durationSeconds < 5 || inputVelocity > 15) {
         integrityFlag = 'LOW_INTEGRITY';
         xpEarned = 0;
     } else {
-        xpEarned = baseXp;
+        xpEarned = Math.round(baseXp);
     }
 
     const db = await getDb();

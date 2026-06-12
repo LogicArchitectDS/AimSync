@@ -9,10 +9,11 @@ interface GameState {
     combo: number;
     maxCombo: number;
     sessionXp: number;
+    isTrial: boolean;
 
     highScore: number; // <-- NEW: Add to the interface
 
-    startGame: (durationInSeconds: number) => void;
+    startGame: (durationInSeconds: number, isTrial?: boolean) => void;
     recordShot: () => void;
     recordHit: (baseXp?: number) => void;
     recordMiss: () => void;
@@ -30,20 +31,21 @@ export const useGameStore = create<GameState>((set) => ({
     combo: 0,
     maxCombo: 0,
     sessionXp: 0,
+    isTrial: false,
 
     highScore: 0, // <-- NEW: Initialize it
 
-    startGame: (duration) => set({
+    startGame: (duration, isTrial = false) => set({
         status: 'playing', score: 0, shotsFired: 0,
         timeRemaining: duration, totalDuration: duration,
-        combo: 0, maxCombo: 0, sessionXp: 0
+        combo: 0, maxCombo: 0, sessionXp: 0, isTrial
     }),
 
     recordShot: () => set((state) => ({ shotsFired: state.shotsFired + 1 })),
 
     recordHit: (baseXp = 10) => set((state) => {
         const newCombo = state.combo + 1;
-        const xpEarned = baseXp * newCombo;
+        const xpEarned = state.isTrial ? 0 : baseXp * newCombo;
 
         return {
             score: state.score + 1,

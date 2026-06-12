@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { GameResult, Difficulty } from "@/lib/game/types";
 import { getModeConfig } from "@/lib/config/modeRegistry";
 import { RoutineDirector } from "@/lib/services/routineDirector";
+import { useAuth } from "@/lib/contexts/AuthContext";
 
 interface ResultsScreenProps {
     exerciseId?: string;
@@ -34,6 +35,7 @@ export default function ResultsScreen({
     const router = useRouter();
     const storeReset = useGameStore(state => state.reset);
     const storeStartGame = useGameStore(state => state.startGame);
+    const { isTrial } = useAuth();
 
     const [dailyState, setDailyState] = useState(() => RoutineDirector.getContractState());
     const [isContractActive, setIsContractActive] = useState(() => RoutineDirector.isContractActive());
@@ -91,11 +93,13 @@ export default function ResultsScreen({
                     hits,
                     misses,
                     maxCombo,
+                    score: result?.score ?? 0,
                     durationSeconds,
                     ghostTelemetry: result?.ghostTelemetry || null,
                     averageUrgencyIndex: result?.extraStats?.["Urgency Index"] ?? 1.0,
                     overFlickCoefficient: result?.extraStats?.["Over-Flick Coefficient"] ?? 1.0,
-                    missQuadrants: result?.missQuadrants || null
+                    missQuadrants: result?.missQuadrants || null,
+                    isTrial: isTrial
                 };
 
                 const response = await fetch('/api/scores', {
@@ -188,7 +192,7 @@ export default function ResultsScreen({
         } else {
             hasSyncedRef.current = false;
             setIsSyncing(true);
-            storeStartGame(durationSeconds);
+            storeStartGame(durationSeconds, isTrial);
         }
     };
 

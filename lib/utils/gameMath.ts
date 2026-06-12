@@ -44,11 +44,15 @@ export const isPointInsideTarget = (
 };
 
 export const getScaledCanvasCoordinates = (
-    event: ReactMouseEvent<HTMLCanvasElement>,
+    event: ReactMouseEvent<HTMLCanvasElement> | MouseEvent,
     canvas: HTMLCanvasElement,
     canvasWidth: number,
-    canvasHeight: number
+    canvasHeight: number,
+    pointerLockedPos?: { x: number; y: number }
 ) => {
+    if (document.pointerLockElement === canvas && pointerLockedPos) {
+        return pointerLockedPos;
+    }
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvasWidth / rect.width;
     const scaleY = canvasHeight / rect.height;

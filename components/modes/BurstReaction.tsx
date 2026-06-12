@@ -141,7 +141,7 @@ export default function BurstReaction({ overrideSettings, onFinish }: BurstReact
         const canvas = engine.canvasRef.current;
         if (!canvas) return;
 
-        const { x, y } = getScaledCanvasCoordinates(event, canvas, engine.dimensions.width, engine.dimensions.height);
+        const { x, y } = getScaledCanvasCoordinates(event, canvas, engine.dimensions.width, engine.dimensions.height, engine.mousePosRef.current);
         let hitIndex = -1;
         for (let i = 0; i < targetsRef.current.length; i++) {
             if (isPointInsideTarget(x, y, targetsRef.current[i].x, targetsRef.current[i].y, targetsRef.current[i].radius)) {

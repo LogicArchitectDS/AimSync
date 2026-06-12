@@ -384,7 +384,7 @@ export default function JigglePeek({ overrideSettings, onFinish }: JigglePeekPro
         const canvas = canvasRef.current;
         if (!canvas) return;
         
-        const { x, y } = getScaledCanvasCoordinates(e, canvas, engine.dimensions.width, engine.dimensions.height);
+        const { x, y } = getScaledCanvasCoordinates(e, canvas, engine.dimensions.width, engine.dimensions.height, engine.mousePosRef.current);
         mousePosRef.current = { x, y };
     };
 
@@ -398,7 +398,7 @@ export default function JigglePeek({ overrideSettings, onFinish }: JigglePeekPro
         const canvas = canvasRef.current;
         if (!canvas) return;
 
-        const { x, y } = getScaledCanvasCoordinates(e, canvas, engine.dimensions.width, engine.dimensions.height);
+        const { x, y } = getScaledCanvasCoordinates(e, canvas, engine.dimensions.width, engine.dimensions.height, engine.mousePosRef.current);
 
         // Click while target is hidden -> MISFIRE!
         if (target.status === "hidden") {

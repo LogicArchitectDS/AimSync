@@ -27,6 +27,7 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const targetRef = useRef<TrueTrackingTarget | null>(null);
     const mouseRef = useRef({ x: 0, y: 0 });
+    const targetTrailRef = useRef<{ x: number; y: number }[]>([]);
 
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
     const effectiveDifficulty = overrideSettings?.difficulty ?? difficulty;
@@ -83,6 +84,29 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
                 targetRef.current = { ...nextTarget, health: newHealth, isBeingTracked: isHit } as TrueTrackingTarget;
 
                 ctx.clearRect(0, 0, engine.dimensions.width, engine.dimensions.height);
+
+                // Add to trail queue
+                targetTrailRef.current.push({ x: nextTarget.x, y: nextTarget.y });
+                if (targetTrailRef.current.length > 15) {
+                    targetTrailRef.current.shift();
+                }
+
+                // Draw fading trail polyline (purple themed for consistency check)
+                const trail = targetTrailRef.current;
+                if (trail.length > 1) {
+                    for (let i = 0; i < trail.length - 1; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(trail[i].x, trail[i].y);
+                        ctx.lineTo(trail[i + 1].x, trail[i + 1].y);
+                        const opacity = (i / (trail.length - 1)) * 0.4;
+                        ctx.strokeStyle = `rgba(139, 92, 246, ${opacity})`;
+                        ctx.lineWidth = (i / (trail.length - 1)) * 4 + 1;
+                        ctx.lineCap = "round";
+                        ctx.lineJoin = "round";
+                        ctx.stroke();
+                    }
+                }
+
                 const t = targetRef.current;
 
                 // Purple-tinted target for ConsistencyCheck identity
@@ -121,8 +145,11 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
     const spawnTarget = useCallback(() => {
         engine.clearAllTimersAndLoops();
         const currentSession = engine.sessionIdxRef.current;
-        const elapsedSec = (performance.now() - engine.dimensionsRef.current.width) / 1000; // placeholder
+        const elapsedSec = 0;
         const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, engine.duration);
+
+        // Clear trail queue on spawn
+        targetTrailRef.current = [];
 
         const baseTarget = createTrackingTarget(
             effectiveDifficulty,
@@ -163,7 +190,7 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
 
     const updateMousePosition = (event: React.MouseEvent<HTMLCanvasElement>) => {
         if (!canvasRef.current) return;
-        const { x, y } = getScaledCanvasCoordinates(event, canvasRef.current, engine.dimensions.width, engine.dimensions.height);
+        const { x, y } = getScaledCanvasCoordinates(event, canvasRef.current, engine.dimensions.width, engine.dimensions.height, engine.mousePosRef.current);
         mouseRef.current.x = x;
         mouseRef.current.y = y;
     };

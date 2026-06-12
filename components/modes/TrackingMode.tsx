@@ -24,6 +24,7 @@ interface TrackingModeProps { overrideSettings?: OverrideSettings; onFinish?: (r
 export default function TrackingMode({ overrideSettings, onFinish }: TrackingModeProps = {}) {
     const targetRef = useRef<TrueTrackingTarget | null>(null);
     const mouseRef = useRef({ x: 0, y: 0 });
+    const targetTrailRef = useRef<{ x: number; y: number }[]>([]);
 
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
     const effectiveDifficulty = overrideSettings?.difficulty ?? difficulty;
@@ -78,6 +79,28 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
 
                 ctx.clearRect(0, 0, w, h);
 
+                // Add to trail queue
+                targetTrailRef.current.push({ x: nextTarget.x, y: nextTarget.y });
+                if (targetTrailRef.current.length > 15) {
+                    targetTrailRef.current.shift();
+                }
+
+                // Draw fading trail polyline
+                const trail = targetTrailRef.current;
+                if (trail.length > 1) {
+                    for (let i = 0; i < trail.length - 1; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(trail[i].x, trail[i].y);
+                        ctx.lineTo(trail[i + 1].x, trail[i + 1].y);
+                        const opacity = (i / (trail.length - 1)) * 0.4;
+                        ctx.strokeStyle = `rgba(0, 229, 255, ${opacity})`;
+                        ctx.lineWidth = (i / (trail.length - 1)) * 4 + 1;
+                        ctx.lineCap = "round";
+                        ctx.lineJoin = "round";
+                        ctx.stroke();
+                    }
+                }
+
                 const t = targetRef.current;
                 const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 
@@ -119,6 +142,9 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
         const elapsedSec = 0;
         const radius = getScaledRadius(config.targetRadius, effectiveDifficulty, elapsedSec, engine.duration);
 
+        // Clear trail queue on spawn
+        targetTrailRef.current = [];
+
         const baseTarget = createTrackingTarget(
             effectiveDifficulty,
             engine.dimensions.width,
@@ -151,7 +177,7 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
 
     const updateMousePosition = (event: React.MouseEvent<HTMLCanvasElement>) => {
         if (!engine.canvasRef.current) return;
-        const { x, y } = getScaledCanvasCoordinates(event, engine.canvasRef.current, engine.dimensions.width, engine.dimensions.height);
+        const { x, y } = getScaledCanvasCoordinates(event, engine.canvasRef.current, engine.dimensions.width, engine.dimensions.height, engine.mousePosRef.current);
         mouseRef.current.x = x;
         mouseRef.current.y = y;
 
@@ -167,7 +193,7 @@ export default function TrackingMode({ overrideSettings, onFinish }: TrackingMod
 
     const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
         if (!engine.canvasRef.current) return;
-        const { x, y } = getScaledCanvasCoordinates(event, engine.canvasRef.current, engine.dimensions.width, engine.dimensions.height);
+        const { x, y } = getScaledCanvasCoordinates(event, engine.canvasRef.current, engine.dimensions.width, engine.dimensions.height, engine.mousePosRef.current);
         if (targetRef.current) {
             const isHit = isPointInsideTarget(x, y, targetRef.current.x, targetRef.current.y, targetRef.current.radius);
             if (!isHit) {

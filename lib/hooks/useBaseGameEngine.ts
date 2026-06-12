@@ -77,6 +77,7 @@ export function useBaseGameEngine({
   const lastPathRecordTimeRef = useRef<number>(0);
   const sessionStartTimeRef = useRef<number>(0);
   const ghostCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const ghostAnimFrameRef = useRef<number | null>(null);
   const missQuadrantsRef = useRef({ topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 });
 
 
@@ -330,13 +331,12 @@ export function useBaseGameEngine({
           accY = e.movementY;
         }
 
-        // ── Integrate deltas and clamp to mode bounding box ───────────────
-        const config = getModeConfig(modeId);
-        const bb = config.spawnBoundingBox;
-        const minX = bb.minX * width;
-        const maxX = bb.maxX * width;
-        const minY = bb.minY * height;
-        const maxY = bb.maxY * height;
+        // Ensure cursor clamping bounds are tracking the dynamic client bounding rectangle of the canvas element container
+        const rect = canvas.getBoundingClientRect();
+        const minX = 0;
+        const maxX = rect.width;
+        const minY = 0;
+        const maxY = rect.height;
 
         mousePosRef.current = {
           x: Math.min(maxX, Math.max(minX, mousePosRef.current.x + accX)),
@@ -506,9 +506,9 @@ export function useBaseGameEngine({
                   }
                 }
               }
-              addAnimationFrame(runPlayback);
+              ghostAnimFrameRef.current = requestAnimationFrame(runPlayback);
             };
-            addAnimationFrame(runPlayback);
+            ghostAnimFrameRef.current = requestAnimationFrame(runPlayback);
           } else {
             setLoadedGhost(null);
             loadedGhostRef.current = null;
@@ -530,7 +530,13 @@ export function useBaseGameEngine({
         ctx?.clearRect(0, 0, canvas.width, canvas.height);
       }
     }
-  }, [phase, modeId, addAnimationFrame]);
+
+    return () => {
+      if (ghostAnimFrameRef.current !== null) {
+        cancelAnimationFrame(ghostAnimFrameRef.current);
+      }
+    };
+  }, [phase, modeId]);
 
   // Session Ticker
   useEffect(() => {
@@ -549,7 +555,6 @@ export function useBaseGameEngine({
         return prev - 1;
       });
     }, 1000);
-    intervalRefs.current.push(id);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, duration]);

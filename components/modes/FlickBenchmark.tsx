@@ -176,7 +176,7 @@ export default function FlickBenchmark({ onFinish }: FlickBenchmarkProps) {
         const canvas = engine.canvasRef.current;
         if (!canvas) return;
 
-        const { x, y } = getScaledCanvasCoordinates(e, canvas, engine.dimensions.width, engine.dimensions.height);
+        const { x, y } = getScaledCanvasCoordinates(e, canvas, engine.dimensions.width, engine.dimensions.height, engine.mousePosRef.current);
 
         if (isPointInsideTarget(x, y, target.x, target.y, target.radius)) {
             // ── Kinematic diagnostics ─────────────────────────────────

@@ -200,7 +200,7 @@ export default function CognitiveOverdrive({ overrideSettings, onFinish }: Cogni
         const canvas = engine.canvasRef.current;
         if (!canvas) return;
 
-        const { x, y } = getScaledCanvasCoordinates(event, canvas, engine.dimensions.width, engine.dimensions.height);
+        const { x, y } = getScaledCanvasCoordinates(event, canvas, engine.dimensions.width, engine.dimensions.height, engine.mousePosRef.current);
         const time = performance.now() / 1000;
 
         let hitDistractor: Distractor | null = null;
