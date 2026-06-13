@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
+import { getLevelFromXp } from '@/lib/utils/progressionEngine';
 
 // Force Next.js to use Cloudflare's Edge network for edge execution
 export const runtime = 'edge';
@@ -14,12 +15,6 @@ async function getDb(): Promise<any> {
     } catch {
         return null;
     }
-}
-
-// Converts raw category XP to discrete level
-function getLevelFromXp(xp: number): number {
-    if (xp < 0) return 1;
-    return Math.floor(Math.sqrt(xp / 500)) + 1;
 }
 
 export async function GET(request: Request) {

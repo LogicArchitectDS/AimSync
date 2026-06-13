@@ -1,4 +1,5 @@
 import type { GameResult, UserStats, CustomPlaylist } from "../game/types";
+import { getLevelFromXp } from './progressionEngine';
 
 const STORAGE_KEYS = {
     STATS: "aimsync_stats",
@@ -138,12 +139,8 @@ export const StorageEngine = {
         if (!isTrial) {
             stats.xp = (stats.xp || 0) + sessionXp;
 
-            // Level up formula (500 * level^2)
-            let currentLevel = stats.level || 1;
-            while (stats.xp >= Math.pow(currentLevel, 2) * 500) {
-                currentLevel++;
-            }
-            stats.level = currentLevel;
+            // Level up formula (centralized quadratic logic)
+            stats.level = getLevelFromXp(stats.xp);
         }
 
         // Distribute XP into factors

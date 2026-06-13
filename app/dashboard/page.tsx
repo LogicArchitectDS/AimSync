@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { StorageEngine } from "@/lib/utils/storage";
+import { getXpProgressWithinLevel, getXpRequiredForLevel } from '@/lib/utils/progressionEngine';
 import { useAuth } from "@/lib/contexts/AuthContext";
 import type { UserStats, CustomPlaylist, PlaylistTask } from "@/lib/game/types";
 import dynamic from 'next/dynamic';
@@ -270,13 +271,12 @@ export default function DashboardPage() {
 
     const rankInfo = getRankInfo(safeStats);
 
-    const currentLevel  = safeStats.level || 1;
-    const currentXp     = safeStats.xp    || 0;
-    const prevLevelXp   = Math.pow(currentLevel - 1, 2) * 500;
-    const nextLevelXp   = Math.pow(currentLevel,     2) * 500;
-    const xpProgress    = currentXp - prevLevelXp;
-    const xpRequired    = nextLevelXp - prevLevelXp;
-    const xpPercentage  = Math.min(100, Math.max(0, (xpProgress / Math.max(xpRequired, 1)) * 100));
+    const totalXp       = safeStats.xp    || 0;
+    const progress      = getXpProgressWithinLevel(totalXp);
+    
+    const currentLevel  = progress.currentLevel;
+    const nextLevelXp   = getXpRequiredForLevel(progress.nextLevel);
+    const xpPercentage  = progress.percentageComplete;
 
     return (
         <div className="flex flex-col gap-8 w-full relative">
@@ -402,7 +402,7 @@ export default function DashboardPage() {
                                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Level</span>
                                     <span className="text-2xl font-black text-white">{currentLevel}</span>
                                 </div>
-                                <span className="text-[10px] text-slate-400 font-bold tracking-widest">{currentXp.toLocaleString()} / {nextLevelXp.toLocaleString()} XP</span>
+                                <span className="text-[10px] text-slate-400 font-bold tracking-widest">{totalXp.toLocaleString()} / {nextLevelXp.toLocaleString()} XP</span>
                             </div>
                             <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden relative z-10">
                                 <div

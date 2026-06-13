@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
+import { getLevelFromXp, getXpProgressWithinLevel } from '@/lib/utils/progressionEngine';
 
 // Force Next.js to use Cloudflare's Edge network for zero-latency database calls
 export const runtime = 'edge';
@@ -215,16 +216,10 @@ export async function POST(request: Request) {
         const mockLevelBefore = 1;
         const newTotalXp = mockTotalXpBefore + xpEarned;
 
-        let level = mockLevelBefore;
-        let tempXp = newTotalXp;
-        while (tempXp >= 500 * (level * level)) {
-            tempXp -= 500 * (level * level);
-            level++;
-        }
-
-        const currentLevel = level;
-        const currentXp = tempXp;
-        const xpNeededForNext = 500 * (level * level);
+        const progress = getXpProgressWithinLevel(newTotalXp);
+        const currentLevel = progress.currentLevel;
+        const currentXp = progress.xpIntoLevel;
+        const xpNeededForNext = progress.xpNeededForNext;
         const levelUp = currentLevel > mockLevelBefore;
 
         return NextResponse.json({
@@ -275,16 +270,11 @@ export async function POST(request: Request) {
 
         // Quadratic Level Math Engine
         const newTotalXp = oldTotalXp + xpEarned;
-        let level = 1;
-        let tempXp = newTotalXp;
-        while (tempXp >= 500 * (level * level)) {
-            tempXp -= 500 * (level * level);
-            level++;
-        }
-
-        const currentLevel = level;
-        const currentXp = tempXp;
-        const xpNeededForNext = 500 * (level * level);
+        const progress = getXpProgressWithinLevel(newTotalXp);
+        
+        const currentLevel = progress.currentLevel;
+        const currentXp = progress.xpIntoLevel;
+        const xpNeededForNext = progress.xpNeededForNext;
         const levelUp = currentLevel > oldLevel;
 
         // Atomic D1 Execution
