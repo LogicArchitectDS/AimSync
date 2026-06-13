@@ -6,7 +6,6 @@ import { StorageEngine } from "@/lib/utils/storage";
 import { useAuth } from "@/lib/contexts/AuthContext";
 import type { UserStats, CustomPlaylist, PlaylistTask } from "@/lib/game/types";
 import dynamic from 'next/dynamic';
-import { RoutineDirector } from "@/lib/services/routineDirector";
 import MuscleMemoryHeatmap from "@/components/MuscleMemoryHeatmap";
 import ProMarketplace from "@/components/dashboard/ProMarketplace";
 
@@ -69,12 +68,8 @@ export default function DashboardPage() {
     };
     const [activeTab, setActiveTab] = useState<"training" | "heatmap" | "pro-playlists">("training");
 
-    const [dailyContract, setDailyContract] = useState<any>(null);
-    const [isContractActive, setIsContractActive] = useState(false);
-
     // --- MODAL STATE ---
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
     const [newPlaylistName, setNewPlaylistName] = useState("");
     const [newPlaylistDesc, setNewPlaylistDesc] = useState("");
     const [draftTasks, setDraftTasks] = useState<PlaylistTask[]>([]);
@@ -89,31 +84,10 @@ export default function DashboardPage() {
 
     const radarData = stats?.xpFactors || { flickingXp: 0, trackingXp: 0, speedXp: 0, precisionXp: 0, perceptionXp: 0, cognitionXp: 0 };
 
-    const handleInitiateDailyContract = async () => {
-        const started = await RoutineDirector.startContract(user?.id || "local");
-        setDailyContract(started);
-        setIsContractActive(true);
-        const firstDrill = started.drills[0];
-        router.push(`/game?mode=${firstDrill.modeId}&diff=${firstDrill.difficulty}&time=${firstDrill.durationSeconds}&autoStart=true`);
-    };
-
-    const handleContinueDailyContract = () => {
-        if (dailyContract) {
-            const nextDrill = dailyContract.drills[dailyContract.currentStepIndex];
-            router.push(`/game?mode=${nextDrill.modeId}&diff=${nextDrill.difficulty}&time=${nextDrill.durationSeconds}&autoStart=true`);
-        }
-    };
-
-    const handleAbandonDailyContract = () => {
-        setShowAbandonConfirm(true);
-    };
-
     useEffect(() => {
         const timer = setTimeout(() => {
             setStats(StorageEngine.getUserStats());
             setPlaylists(StorageEngine.getPlaylists());
-            setDailyContract(RoutineDirector.getContractState());
-            setIsContractActive(RoutineDirector.isContractActive());
             setIsLoading(false);
         }, 0);
         return () => clearTimeout(timer);
@@ -286,49 +260,6 @@ export default function DashboardPage() {
 
     return (
         <div className="flex flex-col gap-8 w-full relative">
-
-            {/* --- ABANDON CONTRACT CONFIRMATION MODAL --- */}
-            {showAbandonConfirm && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fadeIn">
-                    <div className="bg-[#121212] border border-red-500/20 rounded-2xl p-8 w-full max-w-md shadow-[0_0_50px_rgba(239,68,68,0.15)] relative overflow-hidden">
-                        {/* Red accent line on top */}
-                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-red-500 via-rose-500 to-transparent" />
-                        
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="p-2.5 bg-red-500/10 rounded-lg text-red-500 border border-red-500/20">
-                                <svg className="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                </svg>
-                            </div>
-                            <h3 className="text-lg font-black text-white uppercase tracking-widest">Abandon Contract</h3>
-                        </div>
-                        
-                        <p className="text-slate-400 text-xs mb-6 leading-relaxed">
-                            Are you sure you want to terminate the active Daily Contract? This will wipe your progression and status for today.
-                        </p>
-                        
-                        <div className="flex gap-2 justify-end">
-                            <button
-                                onClick={() => setShowAbandonConfirm(false)}
-                                className="px-5 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-lg border border-white/10 transition-all"
-                            >
-                                Dismiss
-                            </button>
-                            <button
-                                onClick={() => {
-                                    RoutineDirector.abortContract();
-                                    setDailyContract(null);
-                                    setIsContractActive(false);
-                                    setShowAbandonConfirm(false);
-                                }}
-                                className="px-5 py-2.5 bg-red-950/60 hover:bg-red-600 text-white text-[10px] font-black uppercase tracking-widest rounded-lg border border-red-500/30 hover:border-red-500 transition-all shadow-[0_0_15px_rgba(239,68,68,0.1)]"
-                            >
-                                Terminate Contract
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* --- PLAYLIST CREATOR MODAL --- */}
             {isModalOpen && (
@@ -524,92 +455,7 @@ export default function DashboardPage() {
 
                     {activeTab === "training" ? (
                         <>
-                            {/* DAILY CONTRACT PROTOCOL */}
-                            <div className="bg-[#0b0f19]/80 border border-blue-500/25 p-6 rounded-xl backdrop-blur-md relative overflow-hidden shadow-[0_0_30px_rgba(59,130,246,0.15)]">
-                        {/* Glowing accent border */}
-                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-blue-500 via-cyan-400 to-transparent" />
-                        <div className="absolute -top-24 -right-24 w-64 h-64 bg-cyan-500/10 rounded-full blur-[80px] pointer-events-none" />
-
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4 relative z-10">
-                            <div>
-                                <div className="flex items-center gap-2">
-                                    <span className="px-2 py-0.5 text-[9px] font-black tracking-widest text-[#00E5FF] bg-[#00E5FF]/10 rounded border border-[#00E5FF]/30 uppercase">DIRECTOR INTELLIGENCE</span>
-                                    {isContractActive && <span className="h-1.5 w-1.5 bg-[#00E5FF] rounded-full animate-ping" />}
-                                </div>
-                                <h2 className="text-white font-black text-xl uppercase tracking-wider mt-1">Daily Training Contract</h2>
-                                <p className="text-slate-400 text-xs mt-0.5">Custom performance-calibrated neurological routine</p>
-                            </div>
-                            
-                            {!isContractActive ? (
-                                <button
-                                    onClick={handleInitiateDailyContract}
-                                    className="px-6 py-3 bg-gradient-to-r from-[#3366FF] to-cyan-500 hover:brightness-110 text-white text-[11px] font-black uppercase tracking-widest rounded-lg transition-all shadow-[0_0_20px_rgba(51,102,255,0.4)]"
-                                >
-                                    Initiate Contract
-                                </button>
-                            ) : (
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={handleAbandonDailyContract}
-                                        className="px-4 py-3 bg-red-950/40 hover:bg-red-900/40 text-red-400 border border-red-500/20 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all"
-                                    >
-                                        Abandon
-                                    </button>
-                                    <button
-                                        onClick={handleContinueDailyContract}
-                                        className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 hover:brightness-110 text-white text-[11px] font-black uppercase tracking-widest rounded-lg transition-all shadow-[0_0_20px_rgba(6,182,212,0.4)]"
-                                    >
-                                        Continue Contract
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Contract status & steps */}
-                        {isContractActive && dailyContract ? (
-                            <div className="mt-4 relative z-10 border-t border-white/5 pt-4">
-                                <div className="flex justify-between items-center mb-3">
-                                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
-                                        Sequence Progression
-                                    </span>
-                                    <span className="text-xs font-mono text-[#00E5FF] font-black">
-                                        {dailyContract.currentStepIndex} / {dailyContract.drills.length} Completed
-                                    </span>
-                                </div>
-                                <div className="grid grid-cols-5 gap-2">
-                                    {dailyContract.drills.map((drill: any, idx: number) => {
-                                        const isActive = idx === dailyContract.currentStepIndex;
-                                        const isCompleted = idx < dailyContract.currentStepIndex;
-                                        const { getModeConfig } = require("@/lib/config/modeRegistry");
-                                        const drillName = getModeConfig(drill.modeId)?.name || drill.modeId;
-                                        return (
-                                            <div
-                                                key={idx}
-                                                className={`p-2 rounded border text-center transition-all ${
-                                                    isCompleted
-                                                        ? "bg-emerald-500/5 border-emerald-500/30 text-emerald-400"
-                                                        : isActive
-                                                        ? "bg-cyan-500/10 border-cyan-500/60 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.15)]"
-                                                        : "bg-white/5 border-white/5 text-slate-500"
-                                                }`}
-                                            >
-                                                <div className="text-[9px] font-black uppercase tracking-widest truncate">{drillName}</div>
-                                                <div className="text-[8px] font-mono mt-1 opacity-80">
-                                                    {isCompleted ? "✓ DONE" : isActive ? "▶ ACTIVE" : "⚿ LOCKED"}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="mt-2 text-slate-500 text-xs leading-relaxed border-t border-white/5 pt-3">
-                                The director analyzes your performance telemetry history across all cognitive metrics to generate a balanced 5-exercise regimen every day. Initiating locks the console until all 5 routines are completed.
-                            </div>
-                        )}
-                    </div>
-
-                    {/* SENSITIVITY FINDER DIAGNOSTIC PROTOCOL */}
+                            {/* SENSITIVITY FINDER DIAGNOSTIC PROTOCOL */}
                     <div className="bg-[#120b1e]/85 border border-purple-500/20 p-6 rounded-xl backdrop-blur-md relative overflow-hidden shadow-[0_0_30px_rgba(168,85,247,0.1)] mb-6">
                         {/* Glowing accent border */}
                         <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-purple-500 via-violet-400 to-transparent" />
@@ -681,11 +527,10 @@ export default function DashboardPage() {
                                                     </div>
                                                 </div>
                                                 <button 
-                                                    disabled={isContractActive}
                                                     onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}&taskId=${task.id}`)} 
-                                                    className={`px-6 py-2 text-[10px] font-black uppercase tracking-widest rounded border transition-all ${isCompleted ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 opacity-100' : isContractActive ? 'bg-white/5 text-slate-600 border-white/5 cursor-not-allowed opacity-50' : 'bg-white/5 hover:bg-blue-600 text-white border-white/10 hover:border-blue-500 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0'}`}
+                                                    className={`px-6 py-2 text-[10px] font-black uppercase tracking-widest rounded border transition-all ${isCompleted ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 opacity-100' : 'bg-white/5 hover:bg-blue-600 text-white border-white/10 hover:border-blue-500 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0'}`}
                                                 >
-                                                    {isCompleted ? "Replay" : isContractActive ? "Locked" : "Deploy"}
+                                                    {isCompleted ? "Replay" : "Deploy"}
                                                 </button>
                                             </div>
                                         </div>
@@ -726,11 +571,10 @@ export default function DashboardPage() {
                                                     </div>
                                                 </div>
                                                 <button 
-                                                    disabled={isContractActive}
                                                     onClick={() => router.push(`/game?mode=${task.mode}&time=${task.timeLimit}&diff=${task.difficulty}&taskId=${task.id}`)} 
-                                                    className={`px-8 py-3 text-[11px] font-black uppercase tracking-widest rounded border transition-all ${isCompleted ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 opacity-100' : isContractActive ? 'bg-white/5 text-slate-600 border-white/5 cursor-not-allowed opacity-50 shadow-none' : 'bg-red-600/20 hover:bg-red-600 text-white border-red-500/30 hover:border-red-500 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0 shadow-[0_0_15px_rgba(239,68,68,0.2)]'}`}
+                                                    className={`px-8 py-3 text-[11px] font-black uppercase tracking-widest rounded border transition-all ${isCompleted ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 opacity-100' : 'bg-red-600/20 hover:bg-red-600 text-white border-red-500/30 hover:border-red-500 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0 shadow-[0_0_15px_rgba(239,68,68,0.2)]'}`}
                                                 >
-                                                    {isCompleted ? "Replay" : isContractActive ? "Locked" : "Deploy"}
+                                                    {isCompleted ? "Replay" : "Deploy"}
                                                 </button>
                                             </div>
                                         </div>
@@ -747,10 +591,9 @@ export default function DashboardPage() {
                                 <h2 className="text-white font-black text-lg uppercase tracking-widest">Custom Regimens</h2>
                                 <p className="text-slate-400 text-sm">Your personal warmup routines</p>
                             </div>
-                            <button 
-                                disabled={isContractActive}
+                             <button 
                                 onClick={() => setIsModalOpen(true)} 
-                                className={`px-4 py-2 text-[10px] font-black uppercase tracking-widest rounded transition-colors ${isContractActive ? 'bg-white/5 text-slate-600 cursor-not-allowed shadow-none' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]'}`}
+                                className="px-4 py-2 text-[10px] font-black uppercase tracking-widest rounded transition-colors bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]"
                             >
                                 + Create Routine
                             </button>
@@ -789,11 +632,10 @@ export default function DashboardPage() {
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                             </button>
                                             <button
-                                                disabled={isContractActive}
                                                 onClick={() => router.push(`/game?playlist=${playlist.id}`)}
-                                                className={`px-5 py-2 text-[10px] font-black uppercase tracking-widest rounded border transition-all ${isContractActive ? 'bg-white/5 text-slate-600 border-white/5 cursor-not-allowed' : 'bg-white/5 hover:bg-blue-600 text-white border-white/10 hover:border-blue-500'}`}
+                                                className="px-5 py-2 text-[10px] font-black uppercase tracking-widest rounded border transition-all bg-white/5 hover:bg-blue-600 text-white border-white/10 hover:border-blue-500"
                                             >
-                                                {isContractActive ? "Locked" : "Deploy"}
+                                                Deploy
                                             </button>
                                         </div>
                                     </div>
@@ -822,7 +664,7 @@ export default function DashboardPage() {
                                 return (
                                     <div 
                                         key={protocol.mode} 
-                                        className={`grid grid-cols-12 gap-4 py-4 px-4 items-center border-b border-white/5 transition-colors group ${isContractActive ? 'opacity-40' : 'hover:bg-white/[0.02]'}`}
+                                        className="grid grid-cols-12 gap-4 py-4 px-4 items-center border-b border-white/5 transition-colors group hover:bg-white/[0.02]"
                                     >
                                         <div className="col-span-3 flex flex-col">
                                             <span className="text-white font-bold text-sm tracking-wide group-hover:text-[#3366FF] transition-colors truncate">
@@ -852,7 +694,6 @@ export default function DashboardPage() {
                                         </div>
                                         <div className="col-span-2 flex justify-center px-1">
                                             <select
-                                                disabled={isContractActive}
                                                 value={selection.difficulty}
                                                 onChange={(e) => updateSandboxSelection(protocol.mode, 'difficulty', e.target.value)}
                                                 className="w-full bg-black/60 border border-white/10 hover:border-white/20 text-[10px] font-bold text-slate-300 rounded-md px-2 py-1.5 cursor-pointer focus:outline-none focus:border-[#3366FF] transition-all text-center"
@@ -866,7 +707,6 @@ export default function DashboardPage() {
                                         </div>
                                         <div className="col-span-2 flex justify-center px-1">
                                             <select
-                                                disabled={isContractActive}
                                                 value={selection.duration}
                                                 onChange={(e) => updateSandboxSelection(protocol.mode, 'duration', Number(e.target.value))}
                                                 className="w-full bg-black/60 border border-white/10 hover:border-white/20 text-[10px] font-bold text-slate-300 rounded-md px-2 py-1.5 cursor-pointer focus:outline-none focus:border-[#3366FF] transition-all text-center"
@@ -880,19 +720,10 @@ export default function DashboardPage() {
                                         </div>
                                         <div className="col-span-1 flex justify-end">
                                             <button
-                                                disabled={isContractActive}
                                                 onClick={() => {
-                                                    if (isContractActive) {
-                                                        alert("Daily Contract Active! Please complete or abandon your current contract to access the sandbox.");
-                                                        return;
-                                                    }
                                                     router.push(`/game?mode=${protocol.mode}&time=${selection.duration}&diff=${selection.difficulty}`);
                                                 }}
-                                                className={`p-2 rounded-lg text-[#3366FF] border border-[#3366FF]/30 transition-all transform hover:scale-105 ${
-                                                    isContractActive 
-                                                        ? 'bg-white/5 border-white/5 text-slate-600 cursor-not-allowed'
-                                                        : 'bg-[#3366FF]/10 hover:bg-[#3366FF] hover:text-white hover:border-[#3366FF]'
-                                                }`}
+                                                className="p-2 rounded-lg text-[#3366FF] border border-[#3366FF]/30 transition-all transform hover:scale-105 bg-[#3366FF]/10 hover:bg-[#3366FF] hover:text-white hover:border-[#3366FF]"
                                             >
                                                 <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
                                                     <path d="M8 5v14l11-7z" />
