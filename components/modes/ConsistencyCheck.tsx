@@ -29,6 +29,10 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
     const mouseRef = useRef({ x: 0, y: 0 });
     const targetTrailRef = useRef<{ x: number; y: number }[]>([]);
 
+    const sessionStartRef = useRef<number | null>(null);
+    const hitsHistoryRef = useRef<{ timestamp: number; reactionTime: number }[]>([]);
+    const [realTimeStability, setRealTimeStability] = useState<number>(100);
+
     const [difficulty, setDifficulty] = useState<Difficulty>(overrideSettings?.difficulty ?? "medium");
     const effectiveDifficulty = overrideSettings?.difficulty ?? difficulty;
 
@@ -40,6 +44,39 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
         },
         onSessionComplete: onFinish,
     });
+
+    const computeNeuralStabilityScore = useCallback((hits: { timestamp: number; reactionTime: number }[]) => {
+        const BLOCK_DURATION = 30; // 30 seconds
+        const NUM_BLOCKS = 6;
+        const blocks: number[][] = Array.from({ length: NUM_BLOCKS }, () => []);
+
+        for (const hit of hits) {
+            const blockIdx = Math.min(NUM_BLOCKS - 1, Math.floor(hit.timestamp / BLOCK_DURATION));
+            if (blockIdx >= 0 && blockIdx < NUM_BLOCKS) {
+                blocks[blockIdx].push(hit.reactionTime);
+            }
+        }
+
+        const blockMeans: number[] = [];
+        for (let i = 0; i < NUM_BLOCKS; i++) {
+            const blockHits = blocks[i];
+            if (blockHits.length > 0) {
+                const mean = blockHits.reduce((sum, val) => sum + val, 0) / blockHits.length;
+                blockMeans.push(mean);
+            }
+        }
+
+        if (blockMeans.length < 2) {
+            return 100;
+        }
+
+        const meanOfMeans = blockMeans.reduce((sum, val) => sum + val, 0) / blockMeans.length;
+        const varianceOfMeans = blockMeans.reduce((sum, val) => sum + Math.pow(val - meanOfMeans, 2), 0) / blockMeans.length;
+        const stdDevOfMeans = Math.sqrt(varianceOfMeans);
+        const cv = meanOfMeans > 0 ? (stdDevOfMeans / meanOfMeans) : 0;
+
+        return Math.max(0, Math.min(100, Math.round(100 - cv * 300)));
+    }, []);
 
     const config = difficultyConfig[effectiveDifficulty];
     const accuracy = calculateAccuracy(engine.hits, engine.misses);
@@ -74,6 +111,20 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
 
                 if (newHealth <= 0) {
                     const trackingDuration = performance.now() - targetRef.current.spawnedAt;
+                    const elapsedMs = performance.now() - (sessionStartRef.current ?? performance.now());
+                    const elapsedSec = elapsedMs / 1000;
+                    
+                    hitsHistoryRef.current.push({
+                        timestamp: elapsedSec,
+                        reactionTime: trackingDuration
+                    });
+                    
+                    const stability = computeNeuralStabilityScore(hitsHistoryRef.current);
+                    setRealTimeStability(stability);
+                    if (engine.kinematicsExtraStatsRef) {
+                        engine.kinematicsExtraStatsRef.current["Neural Stability Score"] = stability;
+                    }
+
                     targetRef.current = null;
                     engine.incrementScore(config.scorePerHit + 50);
                     engine.triggerHit(trackingDuration);
@@ -178,10 +229,13 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
     const prevPhaseRef = useRef(engine.phase);
     useEffect(() => {
         if (engine.phase === "live" && prevPhaseRef.current !== "live") {
+            sessionStartRef.current = performance.now();
+            hitsHistoryRef.current = [];
+            setRealTimeStability(100);
             spawnTarget();
         }
         prevPhaseRef.current = engine.phase;
-    }, [engine.phase, spawnTarget]);
+    }, [engine.phase, spawnTarget, computeNeuralStabilityScore]);
 
     // Attach to engine canvasRef
     useEffect(() => {
@@ -280,7 +334,10 @@ export default function ConsistencyCheck({ overrideSettings, onFinish }: Consist
                                 accuracy,
                                 averageReactionTime,
                                 bestReactionTime,
-                                extraLines: [{ label: "Timeouts", value: engine.missedByTimeout }],
+                                extraLines: [
+                                    { label: "Stability", value: `${realTimeStability}%` },
+                                    { label: "Timeouts", value: engine.missedByTimeout }
+                                ],
                             }}
                         />
                     </div>

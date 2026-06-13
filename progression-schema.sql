@@ -30,6 +30,7 @@ CREATE TABLE scores_telemetry (
     average_urgency_index REAL DEFAULT 1.0,
     over_flick_coefficient REAL DEFAULT 1.0,
     miss_quadrants TEXT,
+    neural_stability_score REAL DEFAULT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES user_progression(user_id)
 );

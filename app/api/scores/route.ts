@@ -146,13 +146,17 @@ export async function POST(request: Request) {
     const username              = session.user.name || session.user.email || "Player";
     const ghostTelemetry        = body.ghostTelemetry || body.ghost_telemetry || null;
     const missQuadrants         = body.missQuadrants || body.miss_quadrants || null;
+    const neuralStabilityScore  = typeof body.neuralStabilityScore === 'number' ? body.neuralStabilityScore : null;
 
     const totalTargets = hits + misses;
     const accuracyFraction = totalTargets > 0 ? (hits / totalTargets) : 0;
     const accuracy = accuracyFraction * 100;
 
-    // 2. Input Anti-Cheat Validation
+    // 2. Input Anti-Cheat & Telemetry Progression Validation
     const inputVelocity = durationSeconds > 0 ? (totalTargets / durationSeconds) : 0;
+    const isArithmeticProgression = checkArithmeticProgression(ghostTelemetry);
+    const isFlagged = (durationSeconds < 5 || inputVelocity > 15 || isArithmeticProgression) ? 1 : 0;
+    
     let integrityFlag = 'HIGH_INTEGRITY';
     let xpEarned = 0;
     
@@ -161,9 +165,44 @@ export async function POST(request: Request) {
     const accuracyMultiplier = accuracyFraction > 0.90 ? 1.5 : 1.0;
     const baseXp = 100 + (score / 10) * accuracyMultiplier;
 
-    if (durationSeconds < 5 || inputVelocity > 15) {
+    if (isFlagged === 1) {
         integrityFlag = 'LOW_INTEGRITY';
         xpEarned = 0;
+
+        // Shoot non-blocking, fast alert fetch to n8n webhook
+        const n8nWebhookUrl = process.env.N8N_SECURITY_WEBHOOK_URL;
+        if (n8nWebhookUrl) {
+            const alertPromise = fetch(n8nWebhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username,
+                    score,
+                    is_flagged: 1,
+                    reason: isArithmeticProgression ? 'Arithmetic Progression Timing (Bot/Script)' : 'Velocity/Duration Threshold Exceeded',
+                    hardwareProfile: body.hardwareProfile || body.hardware || 'Unknown HWID',
+                    telemetrySummary: {
+                        hits,
+                        misses,
+                        accuracy: Number(accuracy.toFixed(2)),
+                        durationSeconds,
+                        inputVelocity: Number(inputVelocity.toFixed(2))
+                    }
+                })
+            }).catch(err => console.error('[Anti-Cheat Alert Webhook Error]:', err));
+
+            // Offload HTTP request so it doesn't block the score response
+            try {
+                import('@cloudflare/next-on-pages').then(({ getRequestContext }) => {
+                    const ctxObj = getRequestContext().ctx;
+                    if (ctxObj && typeof ctxObj.waitUntil === 'function') {
+                        ctxObj.waitUntil(alertPromise);
+                    }
+                }).catch(() => {});
+            } catch {
+                // Fallback for non-Cloudflare environments
+            }
+        }
     } else {
         xpEarned = Math.round(baseXp);
     }
@@ -253,15 +292,16 @@ export async function POST(request: Request) {
         //   ALTER TABLE scores_telemetry ADD COLUMN average_urgency_index REAL DEFAULT 1.0;
         //   ALTER TABLE scores_telemetry ADD COLUMN over_flick_coefficient REAL DEFAULT 1.0;
         //   ALTER TABLE scores_telemetry ADD COLUMN miss_quadrants TEXT;
+        //   ALTER TABLE scores_telemetry ADD COLUMN neural_stability_score REAL DEFAULT NULL;
         const missQuadrantsStr = missQuadrants ? JSON.stringify(missQuadrants) : null;
         const stmtTelemetry = db.prepare(`
             INSERT INTO scores_telemetry
                 (user_id, exercise_id, difficulty, username, ghost_telemetry, hits, misses, accuracy, max_combo, duration_seconds,
-                 xp_earned, integrity_flag, average_urgency_index, over_flick_coefficient, miss_quadrants)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 xp_earned, integrity_flag, average_urgency_index, over_flick_coefficient, miss_quadrants, neural_stability_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(
             userId, exerciseId, difficulty, username, ghostTelemetry, hits, misses, accuracy, maxCombo, durationSeconds,
-            xpEarned, integrityFlag, averageUrgencyIndex, overFlickCoefficient, missQuadrantsStr
+            xpEarned, integrityFlag, averageUrgencyIndex, overFlickCoefficient, missQuadrantsStr, neuralStabilityScore
         );
 
         const stmtProgression = db.prepare(`
@@ -291,4 +331,43 @@ export async function POST(request: Request) {
         console.error('D1 POST Telemetry/Progression Error:', error);
         return NextResponse.json({ error: 'Database operations failed' }, { status: 500 });
     }
+}
+
+// --- Helper: Check for bot-like periodic hits forming a perfect arithmetic progression ---
+function checkArithmeticProgression(ghostTelemetry: any): boolean {
+    if (!ghostTelemetry) return false;
+    try {
+        const telemetry = typeof ghostTelemetry === 'string' ? JSON.parse(ghostTelemetry) : ghostTelemetry;
+        let timestamps: number[] = [];
+        if (Array.isArray(telemetry)) {
+            if (telemetry.length < 5) return false;
+            if (typeof telemetry[0] === 'number') {
+                timestamps = telemetry;
+            } else if (telemetry[0] && typeof telemetry[0].t === 'number') {
+                timestamps = telemetry.map((item: any) => item.t);
+            } else if (telemetry[0] && typeof telemetry[0].timestamp === 'number') {
+                timestamps = telemetry.map((item: any) => item.timestamp);
+            }
+        }
+        if (timestamps.length < 5) return false;
+
+        const intervals: number[] = [];
+        for (let i = 1; i < timestamps.length; i++) {
+            intervals.push(timestamps[i] - timestamps[i - 1]);
+        }
+
+        const mean = intervals.reduce((sum, val) => sum + val, 0) / intervals.length;
+        if (mean <= 0) return false;
+
+        const variance = intervals.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / intervals.length;
+        const stdDev = Math.sqrt(variance);
+
+        // Standard deviation < 2ms with consistent rate indicates auto-firing scripts
+        if (stdDev < 2.0) {
+            return true;
+        }
+    } catch {
+        // Fail-safe to avoid false positives or crashes on corrupt client inputs
+    }
+    return false;
 }

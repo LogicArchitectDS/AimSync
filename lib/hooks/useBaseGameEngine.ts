@@ -79,6 +79,7 @@ export function useBaseGameEngine({
   const ghostCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const ghostAnimFrameRef = useRef<number | null>(null);
   const missQuadrantsRef = useRef({ topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 });
+  const hitTimestampsRef = useRef<number[]>([]);
 
 
   const recordSpawnedTarget = useCallback((x: number, y: number, radius: number) => {
@@ -590,27 +591,73 @@ export function useBaseGameEngine({
       };
     } else if (modeId === "consistency-check") {
       const times = reactionTimesRef.current;
-      if (times.length >= 10) {
-        const mean = times.reduce((a, b) => a + b, 0) / times.length;
-        const variance = times.reduce((a, t) => a + Math.pow(t - mean, 2), 0) / times.length;
-        const stdDev = Math.sqrt(variance);
-        const cv = stdDev / mean;
-        const stability = Math.max(0, Math.round(100 - cv * 200));
-        let label = "Severe Variance / Fatigue Failure";
-        if (stability > 90) label = "Robotic Precision";
-        else if (stability > 75) label = "Highly Stable";
-        else if (stability > 50) label = "Moderate Fatigue Detected";
+      const timestamps = hitTimestampsRef.current;
+      if (times.length >= 6) {
+        // Group reaction times into 30-second blocks (30000ms each)
+        const blockDurationMs = 30000;
+        const numBlocks = 6;
+        const blocks: number[][] = Array.from({ length: numBlocks }, () => []);
+        
+        for (let i = 0; i < times.length; i++) {
+          const t = timestamps[i] ?? 0;
+          const blockIdx = Math.min(numBlocks - 1, Math.floor(t / blockDurationMs));
+          if (blockIdx >= 0 && blockIdx < numBlocks) {
+            blocks[blockIdx].push(times[i]);
+          }
+        }
+        
+        const blockMeans: number[] = [];
+        for (let i = 0; i < numBlocks; i++) {
+          const blockHits = blocks[i];
+          if (blockHits.length > 0) {
+            const mean = blockHits.reduce((sum, val) => sum + val, 0) / blockHits.length;
+            blockMeans.push(mean);
+          }
+        }
+        
+        if (blockMeans.length >= 2) {
+          const meanOfMeans = blockMeans.reduce((sum, val) => sum + val, 0) / blockMeans.length;
+          const varianceOfMeans = blockMeans.reduce((sum, val) => sum + Math.pow(val - meanOfMeans, 2), 0) / blockMeans.length;
+          const stdDevOfMeans = Math.sqrt(varianceOfMeans);
+          const cv = meanOfMeans > 0 ? (stdDevOfMeans / meanOfMeans) : 0;
+          const stability = Math.max(0, Math.min(100, Math.round(100 - cv * 300)));
+          
+          let label = "Severe Variance / Fatigue Failure";
+          if (stability > 90) label = "Robotic Precision";
+          else if (stability > 75) label = "Highly Stable";
+          else if (stability > 50) label = "Moderate Fatigue Detected";
 
-        extraStats = {
-          "Stability Score": `${stability}%`,
-          "Assessment": label,
-          "Std Dev Track": `${Math.round(stdDev)}ms`,
-        };
+          extraStats = {
+            "Stability Score": `${stability}%`,
+            "Assessment": label,
+            "Std Dev Track": `${Math.round(stdDevOfMeans)}ms`,
+            "Neural Stability Score": stability,
+          };
+        } else {
+          // Fallback if not enough blocks have data
+          const mean = times.reduce((a, b) => a + b, 0) / times.length;
+          const variance = times.reduce((a, t) => a + Math.pow(t - mean, 2), 0) / times.length;
+          const stdDev = Math.sqrt(variance);
+          const cv = stdDev / mean;
+          const stability = Math.max(0, Math.round(100 - cv * 200));
+          let label = "Severe Variance / Fatigue Failure";
+          if (stability > 90) label = "Robotic Precision";
+          else if (stability > 75) label = "Highly Stable";
+          else if (stability > 50) label = "Moderate Fatigue Detected";
+
+          extraStats = {
+            "Stability Score": `${stability}%`,
+            "Assessment": label,
+            "Std Dev Track": `${Math.round(stdDev)}ms`,
+            "Neural Stability Score": stability,
+          };
+        }
       } else {
         extraStats = {
           "Stability Score": "0%",
           "Assessment": "Insufficient Data",
           "Std Dev Track": "0ms",
+          "Neural Stability Score": 0,
         };
       }
     }
@@ -694,6 +741,7 @@ export function useBaseGameEngine({
     totalSpawnedRef.current = 0;
     missedByTimeoutRef.current = 0;
     missQuadrantsRef.current = { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 };
+    hitTimestampsRef.current = [];
 
 
     setScore(0);
@@ -748,6 +796,7 @@ export function useBaseGameEngine({
       maxComboRef.current = comboRef.current;
     }
     reactionTimesRef.current.push(reactionTime);
+    hitTimestampsRef.current.push(performance.now() - sessionStartTimeRef.current);
 
     setHits(hitsRef.current);
     setCombo(comboRef.current);

@@ -1,7 +1,6 @@
 'use client';
 
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { PointerLockControls } from '@react-three/drei';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -14,17 +13,32 @@ import { useWeaponStore } from '@/store/weaponStore';
 import { useRecoil } from '@/hooks/UseRecoil';
 import { useGameStore } from '@/store/gameStore';
 import { StorageEngine } from '@/lib/utils/storage';
+import { useRawInput } from '@/hooks/useRawInput';
+import { useWeaponAudio } from '@/hooks/useWeaponAudio';
+
+// Reusable Vector2 reference to prevent GC allocation in the 144Hz loop
+const CENTER_COORDS = new THREE.Vector2(0, 0);
 
 // --- THE 3D ENGINE CORE ---
 function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMode: string }) {
     const { camera, scene } = useThree();
     const activeWeapon = useWeaponStore((state) => state.activeWeapon);
 
-    const { startFiring, stopFiring } = useRecoil(activeWeapon);
+    const { startFiring, stopFiring, getShotTrajectory } = useRecoil(activeWeapon);
     const { recordShot, recordHit, recordMiss } = useGameStore();
+    const { playFire } = useWeaponAudio();
 
     const raycaster = useRef(new THREE.Raycaster());
     const pendingShot = useRef(false);
+
+    // Dynamic mouse sensitivity loader
+    const [sensitivity, setSensitivity] = useState(1.0);
+    useEffect(() => {
+        const { getStoredSettings } = require('@/lib/utils/userSettingsStorage');
+        setSensitivity(getStoredSettings().sensitivity);
+    }, []);
+
+    const { addRecoil } = useRawInput({ sensitivity });
 
     useEffect(() => {
         const handleMouseDown = (e: MouseEvent) => {
@@ -53,9 +67,39 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
             pendingShot.current = false; // Consume the shot
             recordShot();
 
-            // Raycast logic
-            raycaster.current.setFromCamera(new THREE.Vector2(0, 0), camera);
-            const intersects = raycaster.current.intersectObjects(scene.children, true);
+            // Play firing sound instantly
+            if (activeWeapon && activeWeapon.id) {
+                playFire(activeWeapon.id);
+            }
+
+            // Calculate and apply camera recoil kickback
+            const trajectory = getShotTrajectory();
+            // In Three.js, vertical kick climbs upwards which translates to negative local X rotation.
+            // Adjust coefficients to align recoil magnitude with 3D space movement.
+            addRecoil(-trajectory.kickY * 0.45, trajectory.kickX * 0.45, (Math.random() - 0.5) * 0.015);
+
+            // Raycast logic with zero allocation
+            raycaster.current.setFromCamera(CENTER_COORDS, camera);
+
+            // Filter scene elements to inspect only active target meshes (strict raycast filtering)
+            const targets: THREE.Object3D[] = [];
+            for (const child of scene.children) {
+                if (child.type === 'Group') {
+                    for (const subChild of child.children) {
+                        if (subChild.name === 'target' || subChild.name === 'tracking-target') {
+                            targets.push(subChild);
+                        } else if (subChild.type === 'Group') {
+                            for (const mesh of subChild.children) {
+                                if (mesh.name === 'target') {
+                                    targets.push(mesh);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            const intersects = raycaster.current.intersectObjects(targets, true);
 
             if (intersects.length > 0) {
                 const hitObject = intersects[0].object;
@@ -63,12 +107,25 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
                     // The Death Lock: Prevents ghost-spawns
                     if (!hitObject.userData.isDead) {
                         hitObject.userData.isDead = true;
+                        
                         if (hitObject.userData.isFriendly) {
-                            // Friendly target hit: instantly reset player combo
+                            // Protocol 2: Left-clicking a friendly mesh instantly resets combo
                             recordMiss();
                         } else {
-                            recordHit(10);
+                            // Protocol 1: Echolocation sound tracking reaction check
+                            if (activeMode === 'echolocation') {
+                                const delta = performance.now() - hitObject.userData.spawnTime;
+                                const reactionWindow = 750; // 750ms reaction window
+                                if (delta <= reactionWindow) {
+                                    recordHit(30); // Max score multiplier (3x base XP)
+                                } else {
+                                    recordHit(10);
+                                }
+                            } else {
+                                recordHit(10);
+                            }
                         }
+
                         if (hitObject.userData.onHit) {
                             hitObject.userData.onHit(hitObject.userData.id);
                         }
@@ -84,7 +141,6 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
 
     return (
         <>
-            <PointerLockControls />
             <ambientLight intensity={0.5} />
             <directionalLight position={[10, 10, 10]} intensity={1} />
 

@@ -50,6 +50,8 @@ export default function DashboardPage() {
     const [stats, setStats] = useState<UserStats | null>(null);
     const [playlists, setPlaylists] = useState<CustomPlaylist[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [radarTelemetry, setRadarTelemetry] = useState<any[]>([]);
+    const [isRadarLoading, setIsRadarLoading] = useState(true);
 
     const [sandboxSelections, setSandboxSelections] = useState<Record<string, { difficulty: string; duration: number }>>({});
 
@@ -90,6 +92,24 @@ export default function DashboardPage() {
             setPlaylists(StorageEngine.getPlaylists());
             setIsLoading(false);
         }, 0);
+
+        const fetchRadarStats = async () => {
+            try {
+                const res = await fetch('/api/get-stats');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (Array.isArray(data)) {
+                        setRadarTelemetry(data);
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to fetch dashboard radar stats:", err);
+            } finally {
+                setIsRadarLoading(false);
+            }
+        };
+        fetchRadarStats();
+
         return () => clearTimeout(timer);
     }, []);
 
@@ -414,7 +434,7 @@ export default function DashboardPage() {
                             <div><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Play Time</p><p className="text-xl font-mono text-white">{formatTime(safeStats.timePlayedSeconds || 0)}</p></div>
                         </div>
                     </div>
-                    <div className="flex items-center justify-center"><RadarProfiler stats={radarData} /></div>
+                    <div className="flex items-center justify-center"><RadarProfiler data={radarTelemetry} loading={isRadarLoading} /></div>
                 </div>
 
                 {/* RIGHT PANEL */}

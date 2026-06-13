@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { AuthStorage, UserProfile } from "@/lib/utils/authStorage";
 import { StorageEngine } from "@/lib/utils/storage"; // <-- Added the new D1 Storage Engine
 import { useRouter, usePathname } from "next/navigation";
+import { useWeaponAudio } from "@/hooks/useWeaponAudio";
 
 interface AuthContextType {
     user: UserProfile | null;
@@ -24,6 +25,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [isLoading, setIsLoading] = useState(true);
     const router = useRouter();
     const pathname = usePathname();
+
+    // Preload weapon audios into memory on mount
+    useWeaponAudio();
 
     // 1. REHYDRATION & BACKGROUND SYNC
     useEffect(() => {

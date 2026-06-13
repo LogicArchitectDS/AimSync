@@ -19,6 +19,7 @@ import ComboMeter from "@/components/ComboMeter";
 import { spawnHitmarker } from "@/lib/utils/hitmarker";
 import { useKinematicsTracker } from "@/lib/hooks/useKinematicsTracker";
 import StreakAnnouncer from "@/components/StreakAnnouncer";
+import { ParticleShatterSystem } from "@/lib/engine/ParticleShatter";
 
 interface OverrideSettings { difficulty: Difficulty; duration: number; taskId?: string; }
 interface StaticFlickProps { overrideSettings?: OverrideSettings; onFinish?: (result: GameResult) => void; }
@@ -45,6 +46,15 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
     const kinUiSumRef    = useRef(0);
     const kinOfcSumRef   = useRef(0);
     const kinSampleCount = useRef(0);
+
+    // High-performance particle system instance
+    const particleSystemRef = useRef<ParticleShatterSystem | null>(null);
+    useEffect(() => {
+        particleSystemRef.current = new ParticleShatterSystem();
+        return () => {
+            particleSystemRef.current?.reset();
+        };
+    }, []);
 
     const config = difficultyConfig[effectiveDifficulty];
 
@@ -105,30 +115,69 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
     const preRenderedCanvasRef = useRef<HTMLCanvasElement | OffscreenCanvas | null>(null);
     const lastPreRenderedRadius = useRef<number | null>(null);
 
-    // Canvas render effect — fires whenever target or dimensions change
+    // Canvas render effect — continuous requestAnimationFrame loop when game is live
     useEffect(() => {
         const canvas = engine.canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
-        ctx.clearRect(0, 0, engine.dimensions.width, engine.dimensions.height);
+        let animationFrameId: number;
+        let lastTime = performance.now();
 
-        if (target) {
-            const t = target;
-            const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+        const tick = () => {
+            const now = performance.now();
+            const delta = Math.min(0.1, (now - lastTime) / 1000);
+            lastTime = now;
 
-            if (!preRenderedCanvasRef.current || lastPreRenderedRadius.current !== t.radius) {
-                const { preRenderStaticFlickTarget } = require("@/lib/utils/canvasHelpers");
-                preRenderedCanvasRef.current = preRenderStaticFlickTarget(t.radius, dpr);
-                lastPreRenderedRadius.current = t.radius;
+            ctx.clearRect(0, 0, engine.dimensions.width, engine.dimensions.height);
+
+            // Draw active target
+            if (target) {
+                const t = target;
+                const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+
+                if (!preRenderedCanvasRef.current || lastPreRenderedRadius.current !== t.radius) {
+                    const { preRenderStaticFlickTarget } = require("@/lib/utils/canvasHelpers");
+                    preRenderedCanvasRef.current = preRenderStaticFlickTarget(t.radius, dpr);
+                    lastPreRenderedRadius.current = t.radius;
+                }
+
+                const glowRadius = t.radius * 1.7;
+                const size = Math.ceil(glowRadius * 2) + 8;
+                ctx.drawImage(preRenderedCanvasRef.current as any, t.x - size / 2, t.y - size / 2, size, size);
             }
 
-            const glowRadius = t.radius * 1.7;
-            const size = Math.ceil(glowRadius * 2) + 8;
-            ctx.drawImage(preRenderedCanvasRef.current as any, t.x - size / 2, t.y - size / 2, size, size);
+            // Update and draw particle shatter vector FX
+            if (particleSystemRef.current) {
+                particleSystemRef.current.updateAndDraw(ctx, delta);
+            }
+
+            animationFrameId = requestAnimationFrame(tick);
+        };
+
+        if (engine.phase === "live" || engine.countdown !== null) {
+            animationFrameId = requestAnimationFrame(tick);
+        } else {
+            // When not live, clear canvas and draw target if present once
+            ctx.clearRect(0, 0, engine.dimensions.width, engine.dimensions.height);
+            if (target) {
+                const t = target;
+                const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+                const { preRenderStaticFlickTarget } = require("@/lib/utils/canvasHelpers");
+                preRenderedCanvasRef.current = preRenderStaticFlickTarget(t.radius, dpr);
+                const glowRadius = t.radius * 1.7;
+                const size = Math.ceil(glowRadius * 2) + 8;
+                ctx.drawImage(preRenderedCanvasRef.current as any, t.x - size / 2, t.y - size / 2, size, size);
+            }
         }
-    }, [target, engine.dimensions, engine.canvasRef]);
+
+        return () => {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+        };
+    }, [target, engine.dimensions, engine.canvasRef, engine.phase, engine.countdown]);
 
     const lastClickTimeRef = useRef<number>(0);
 
@@ -210,6 +259,11 @@ export default function StaticFlick({ overrideSettings, onFinish }: StaticFlickP
             const reaction = performance.now() - target.spawnedAt;
             engine.triggerHit(reaction);
             engine.incrementScore(config.scorePerHit + (engine.combo * 5));
+
+            // Spawn low-poly debris particle shatter flying outward from target coordinates
+            if (particleSystemRef.current) {
+                particleSystemRef.current.spawnShatter(target.x, target.y, '#3366FF', 16);
+            }
 
             // Persist rolling kinematic session averages into kinematicsExtraStatsRef
             // so they flow into the final GameResult.extraStats at session end.

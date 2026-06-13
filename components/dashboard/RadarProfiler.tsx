@@ -6,42 +6,31 @@ import {
     PolarAngleAxis, ResponsiveContainer, Tooltip
 } from 'recharts';
 
-interface RadarProfilerProps {
-    stats?: {
-        flickingXp: number;
-        trackingXp: number;
-        speedXp: number;
-        precisionXp: number;
-        perceptionXp: number;
-        cognitionXp: number;
-    }
+export interface RadarDataPoint {
+    subject: string;
+    level: number;
+    fullMark?: number;
 }
 
-export default function RadarProfiler({ stats }: RadarProfilerProps) {
+interface RadarProfilerProps {
+    data?: RadarDataPoint[];
+    loading?: boolean;
+}
+
+const DEFAULT_BASELINE: RadarDataPoint[] = [
+    { subject: 'Flicking', level: 1, fullMark: 100 },
+    { subject: 'Tracking', level: 1, fullMark: 100 },
+    { subject: 'Speed', level: 1, fullMark: 100 },
+    { subject: 'Precision', level: 1, fullMark: 100 },
+    { subject: 'Perception', level: 1, fullMark: 100 },
+    { subject: 'Cognition', level: 1, fullMark: 100 },
+];
+
+export default function RadarProfiler({ data, loading = false }: RadarProfilerProps) {
     const [isMounted, setIsMounted] = useState(false);
-    const [chartData, setChartData] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         setIsMounted(true);
-
-        const fetchTelemetry = async () => {
-            try {
-                const res = await fetch('/api/get-stats');
-                if (res.ok) {
-                    const data = await res.json();
-                    if (Array.isArray(data)) {
-                        setChartData(data);
-                    }
-                }
-            } catch (err) {
-                console.error('Failed to fetch radar telemetry:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchTelemetry();
     }, []);
 
     // SSR Guard
@@ -52,6 +41,13 @@ export default function RadarProfiler({ stats }: RadarProfilerProps) {
             </div>
         );
     }
+
+    // Safely fallback using optional chaining and baseline matrix
+    const chartData = (data && data.length > 0) ? data.map(item => ({
+        subject: item?.subject || 'Unknown',
+        level: typeof item?.level === 'number' ? item.level : 1,
+        fullMark: item?.fullMark || 100
+    })) : DEFAULT_BASELINE;
 
     return (
         <div className="w-full max-w-md bg-[#121212]/80 backdrop-blur-md rounded-3xl border border-white/10 p-6 shadow-2xl flex flex-col items-center relative overflow-hidden">

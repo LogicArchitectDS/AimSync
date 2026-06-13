@@ -1,0 +1,52 @@
+{
+  "name": "AimSync: Phase 2 - Cheater Alert Webhook",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "security-cheater-alert",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "cheater-webhook-trigger",
+      "name": "Security Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/webhooks/your-admin-alerts-webhook-url",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"embeds\": [\n    {\n      \"title\": \"🚨 AEGIS-SENTINEL: CHEATING ANOMALY DETECTED\",\n      \"description\": \"An anomalous game state progression and timing pattern was intercepted in scores telemetry pipeline.\",\n      \"color\": 15158332,\n      \"fields\": [\n        {\n          \"name\": \"👤 Player Username\",\n          \"value\": \"`{{ $json.username }}`\",\n          \"inline\": true\n        },\n        {\n          \"name\": \"🎮 Captured Score\",\n          \"value\": \"**{{ $json.score }}**\",\n          \"inline\": true\n        },\n        {\n          \"name\": \"🛡️ Detection Trigger\",\n          \"value\": \"`{{ $json.reason }}`\"\n        },\n        {\n          \"name\": \"💻 Hardware Profile\",\n          \"value\": \"```\\n{{ $json.hardwareProfile }}\\n```\"\n        },\n        {\n          \"name\": \"📊 Telemetry Diagnostics\",\n          \"value\": \"• **Accuracy:** {{ $json.telemetrySummary.accuracy }}%\\n• **Hits/Misses:** {{ $json.telemetrySummary.hits }} Hits / {{ $json.telemetrySummary.misses }} Misses\\n• **Run Duration:** {{ $json.telemetrySummary.durationSeconds }}s\\n• **Target Velocity:** {{ $json.telemetrySummary.inputVelocity }} targets/sec\"\n        }\n      ],\n      \"footer\": {\n        \"text\": \"AimSync Anti-Cheat Edge Daemon\"\n      },\n      \"timestamp\": \"{{ new Date().toISOString() }}\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "send-discord-alert",
+      "name": "Send Discord Alert Embed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        480,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Security Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Send Discord Alert Embed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

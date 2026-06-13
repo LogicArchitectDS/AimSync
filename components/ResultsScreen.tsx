@@ -99,6 +99,7 @@ export default function ResultsScreen({
                     averageUrgencyIndex: result?.extraStats?.["Urgency Index"] ?? 1.0,
                     overFlickCoefficient: result?.extraStats?.["Over-Flick Coefficient"] ?? 1.0,
                     missQuadrants: result?.missQuadrants || null,
+                    neuralStabilityScore: result?.extraStats?.["Neural Stability Score"] ?? null,
                     isTrial: isTrial
                 };
 
@@ -259,6 +260,32 @@ export default function ResultsScreen({
                         </span>
                     </div>
                 </div>
+
+                {/* Consistency Check Custom Stability Metrics */}
+                {currentMode === "consistency-check" && (
+                    <div className="w-full p-6 mb-8 rounded-2xl border border-[#8b5cf6]/30 bg-[#8b5cf6]/5 shadow-[0_0_20px_rgba(139,92,246,0.15)] relative z-10 flex flex-col sm:flex-row justify-around items-center gap-4 text-center sm:text-left">
+                        <div className="flex flex-col items-center sm:items-start">
+                            <span className="text-[#8b5cf6] text-[10px] font-bold tracking-widest uppercase">Neural Stability</span>
+                            <span className="text-4xl font-black text-white mt-1 drop-shadow-[0_0_10px_rgba(139,92,246,0.5)]">
+                                {result?.extraStats?.["Stability Score"] || "100%"}
+                            </span>
+                        </div>
+                        <div className="h-px sm:h-12 w-full sm:w-px bg-white/10" />
+                        <div className="flex flex-col items-center sm:items-start">
+                            <span className="text-gray-500 text-[10px] font-bold tracking-widest uppercase">Variance Assessment</span>
+                            <span className="text-lg font-extrabold text-[#c084fc] mt-1">
+                                {result?.extraStats?.["Assessment"] || "Stable Focus"}
+                            </span>
+                        </div>
+                        <div className="h-px sm:h-12 w-full sm:w-px bg-white/10" />
+                        <div className="flex flex-col items-center sm:items-start">
+                            <span className="text-gray-500 text-[10px] font-bold tracking-widest uppercase">Block-to-Block Std Dev</span>
+                            <span className="text-lg font-bold text-white mt-1">
+                                {result?.extraStats?.["Std Dev Track"] || "0ms"}
+                            </span>
+                        </div>
+                    </div>
+                )}
 
                 {/* 3. Performance Progress Bar Tracker */}
                 {syncData && (

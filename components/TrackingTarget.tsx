@@ -12,6 +12,9 @@ interface TrackingTargetProps {
     activeMode?: string;
 }
 
+// Reusable vector reference to avoid GC allocations in the 144Hz animation loop
+const ZERO_VECTOR = new THREE.Vector3(0, 0, 0);
+
 export default function TrackingTarget({ id, baseDistance = -15, activeMode = 'continuous-track' }: TrackingTargetProps) {
     const meshRef = useRef<THREE.Mesh>(null);
     const activeWeapon = useWeaponStore((state) => state.activeWeapon);
@@ -49,16 +52,23 @@ export default function TrackingTarget({ id, baseDistance = -15, activeMode = 'c
             const recoil = getShotTrajectory();
             const kickY = recoil.kickY || 0;
             const kickX = recoil.kickX || 0;
+            const offsetX = recoil.offsetX || 0;
+            const offsetY = recoil.offsetY || 0;
 
-            const isFiring = activeWeapon ? (kickY > 0) : false;
+            const sprayMagnitude = Math.sqrt(kickX * kickX + kickY * kickY);
+            const bloomMagnitude = Math.sqrt(offsetX * offsetX + offsetY * offsetY);
 
-            if (isFiring && kickY > 0.05) {
-                // If user kicks violently upward, dive downwards and sweep laterally to evade spray
-                evasionOffset.current.y -= 12.0 * delta; // dive down
-                evasionOffset.current.x += Math.sin(t * 12) * 15.0 * delta; // lateral speed swing
+            // Active counter-spray dodge trigger
+            if (sprayMagnitude > 0.05 || bloomMagnitude > 0.005) {
+                // Dodge away from the weapon spray trajectory
+                const dodgeDirX = kickX > 0 ? -1 : 1;
+                const dodgeDirY = kickY > 0 ? -1 : 0.5; // Dive down
+
+                evasionOffset.current.x += (dodgeDirX * 15.0 + Math.sin(t * 15) * 5.0) * delta;
+                evasionOffset.current.y += (dodgeDirY * 12.0) * delta;
             } else {
-                // Return to base Lissajous curve
-                evasionOffset.current.lerp(new THREE.Vector3(0, 0, 0), 0.05);
+                // Return to base Lissajous curve smoothly using static reference
+                evasionOffset.current.lerp(ZERO_VECTOR, 0.1);
             }
 
             // Bind values to prevent the target from completely flying off-screen
@@ -79,9 +89,8 @@ export default function TrackingTarget({ id, baseDistance = -15, activeMode = 'c
             name="tracking-target"
             userData={{ id }}
         >
-            <sphereGeometry args={[0.5, 32, 32]} />
-            {/* Tracking targets glow Orange to differentiate them from Blue Static targets */}
-            <meshStandardMaterial color="#FF9900" emissive="#FF9900" emissiveIntensity={0.6} />
+            <sphereGeometry args={[0.5, 8, 8]} />
+            <meshBasicMaterial color="#FF9900" />
         </mesh>
     );
 }

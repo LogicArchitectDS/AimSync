@@ -1,0 +1,123 @@
+{
+  "name": "AimSync: Phase 1 - Discord Bug Bounty Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "discord-bug-bounty",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "discord-webhook-trigger",
+      "name": "Discord Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst options = body.data?.options || [];\nconst description = options.find(o => o.name === 'description')?.value || 'No description provided';\nconst logs = options.find(o => o.name === 'logs')?.value || 'No logs provided';\nconst username = body.member?.user?.username || body.user?.username || 'unknown_user';\nconst userId = body.member?.user?.id || body.user?.id || 'unknown_id';\n\nreturn {\n  description,\n  logs,\n  username,\n  userId\n};"
+      },
+      "id": "extract-discord-options",
+      "name": "Extract Options",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/LogicArchitectDS/AimSync/issues",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-AimSync-BugBot"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"title\": \"🐛 Bug Report: [{{ $json.username }}]\",\n  \"body\": \"### Description\\n{{ $json.description }}\\n\\n### Logs / Diagnostics\\n```\\n{{ $json.logs }}\\n```\\n\\n*Logged automatically via Discord slash command by @{{ $json.username }} (ID: {{ $json.userId }}).*\",\n  \"labels\": [\"bug-bounty\", \"discord-slash\"]\n}",
+        "options": {}
+      },
+      "id": "create-github-issue",
+      "name": "Create GitHub Issue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        640,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "github-api-token",
+          "name": "GitHub Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"type\": 4,\n  \"data\": {\n    \"embeds\": [\n      {\n        \"title\": \"🐛 Bug Report Tracked!\",\n        \"description\": \"Your bug report has been successfully logged on the AimSync GitHub repository.\",\n        \"color\": 3066993,\n        \"fields\": [\n          {\n            \"name\": \"Reporter\",\n            \"value\": \"<@{{ $node[\\\"Extract Options\\\"].json.userId }}>\",\n            \"inline\": true\n          },\n          {\n            \"name\": \"GitHub Issue\",\n            \"value\": \"[#{{ $json.number }}]({{ $json.html_url }})\",\n            \"inline\": true\n          },\n          {\n            \"name\": \"Description Preview\",\n            \"value\": \"{{ $node[\\\"Extract Options\\\"].json.description.substring(0, 100) }}...\"\n          }\n        ],\n        \"footer\": {\n          \"text\": \"AimSync Aegis Bug Bounty System\"\n        },\n        \"timestamp\": \"{{ new Date().toISOString() }}\"\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "id": "respond-to-discord",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        860,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Discord Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Options",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Options": {
+      "main": [
+        [
+          {
+            "node": "Create GitHub Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create GitHub Issue": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
