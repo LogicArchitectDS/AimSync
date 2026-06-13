@@ -235,9 +235,19 @@ export const StorageEngine = {
                 if (!cloudData.error) {
                     // Reconstruct into the frontend's nested JSON structure
                     const reconstructedStats: UserStats = {
-                        totalGamesPlayed: cloudData.total_games,
-                        timePlayedSeconds: cloudData.time_played,
-                        globalAccuracy: cloudData.global_accuracy,
+                        totalGamesPlayed: cloudData.total_games || 0,
+                        timePlayedSeconds: cloudData.time_played || 0,
+                        globalAccuracy: cloudData.global_accuracy || 0,
+                        xp: cloudData.total_xp || 0,
+                        level: cloudData.current_level || 1,
+                        xpFactors: {
+                            flickingXp: cloudData.xp_flicking || 0,
+                            trackingXp: cloudData.xp_tracking || 0,
+                            speedXp: cloudData.xp_speed || 0,
+                            precisionXp: cloudData.xp_precision || 0,
+                            perceptionXp: cloudData.xp_perception || 0,
+                            cognitionXp: cloudData.xp_cognition || 0
+                        },
                         modes: JSON.parse(cloudData.modes_data || '{}'),
                         playlists: JSON.parse(cloudData.playlists || '[]'),
                         missQuadrants: JSON.parse(cloudData.miss_quadrants || '{}'),

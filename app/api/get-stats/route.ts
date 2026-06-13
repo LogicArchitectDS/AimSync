@@ -55,9 +55,9 @@ export async function GET(request: Request) {
     }
 
     try {
-        // 1. Direct fetch from optimized player_profiles table
+        // 1. Direct fetch from optimized user_progression table
         let profile = await db
-            .prepare('SELECT xp_flicking, xp_tracking, xp_speed, xp_precision, xp_perception, xp_cognition FROM player_profiles WHERE user_id = ?')
+            .prepare('SELECT xp_flicking, xp_tracking, xp_speed, xp_precision, xp_perception, xp_cognition FROM user_progression WHERE user_id = ?')
             .bind(userId)
             .first();
 

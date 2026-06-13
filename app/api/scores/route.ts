@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { getLevelFromXp, getXpProgressWithinLevel } from '@/lib/utils/progressionEngine';
+import { distributeXp } from '@/lib/utils/statsService';
 
 // Force Next.js to use Cloudflare's Edge network for zero-latency database calls
 export const runtime = 'edge';
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
         }
 
         const result = await db
-            .prepare('SELECT * FROM player_stats WHERE user_id = ?')
+            .prepare('SELECT * FROM user_progression WHERE user_id = ?')
             .bind(userId)
             .first();
 
@@ -109,8 +110,14 @@ export async function POST(request: Request) {
         }
         try {
             await db.prepare(`
-                INSERT INTO player_stats (user_id, global_accuracy, total_games, time_played, modes_data, playlists, miss_quadrants, last_played_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO user_progression (
+                    user_id, global_accuracy, total_games, time_played, 
+                    modes_data, playlists, miss_quadrants, 
+                    total_xp, current_level,
+                    xp_flicking, xp_tracking, xp_speed, xp_precision, xp_perception, xp_cognition,
+                    last_played_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT(user_id) DO UPDATE SET
                     global_accuracy = excluded.global_accuracy,
                     total_games = excluded.total_games,
@@ -118,7 +125,16 @@ export async function POST(request: Request) {
                     modes_data = excluded.modes_data,
                     playlists = excluded.playlists,
                     miss_quadrants = excluded.miss_quadrants,
-                    last_played_at = CURRENT_TIMESTAMP
+                    total_xp = excluded.total_xp,
+                    current_level = excluded.current_level,
+                    xp_flicking = excluded.xp_flicking,
+                    xp_tracking = excluded.xp_tracking,
+                    xp_speed = excluded.xp_speed,
+                    xp_precision = excluded.xp_precision,
+                    xp_perception = excluded.xp_perception,
+                    xp_cognition = excluded.xp_cognition,
+                    last_played_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
             `).bind(
                 userId,
                 body.stats.globalAccuracy || 0,
@@ -126,7 +142,15 @@ export async function POST(request: Request) {
                 body.stats.timePlayedSeconds || 0,
                 JSON.stringify(body.stats.modes || {}),
                 JSON.stringify(body.stats.playlists || []),
-                JSON.stringify(body.stats.missQuadrants || {})
+                JSON.stringify(body.stats.missQuadrants || {}),
+                body.stats.xp || 0,
+                body.stats.level || 1,
+                body.stats.xpFactors?.flickingXp || 0,
+                body.stats.xpFactors?.trackingXp || 0,
+                body.stats.xpFactors?.speedXp || 0,
+                body.stats.xpFactors?.precisionXp || 0,
+                body.stats.xpFactors?.perceptionXp || 0,
+                body.stats.xpFactors?.cognitionXp || 0
             ).run();
             return NextResponse.json({ success: true });
         } catch (error) {
@@ -236,7 +260,7 @@ export async function POST(request: Request) {
     try {
         // Read current stats from D1
         const userProgress = await db.prepare(
-            "SELECT current_level, total_xp, surgeon_badge_unlocked, vector_lock_badge_unlocked, vanguard_badge_unlocked FROM user_progression WHERE user_id = ?"
+            "SELECT current_level, total_xp, surgeon_badge_unlocked, vector_lock_badge_unlocked, vanguard_badge_unlocked, total_games FROM user_progression WHERE user_id = ?"
         ).bind(userId).first();
 
         let oldLevel = 1;
@@ -244,6 +268,7 @@ export async function POST(request: Request) {
         let oldSurgeon = 0;
         let oldVector = 0;
         let oldVanguard = 0;
+        let gamesPlayed = 0;
 
         if (userProgress) {
             oldLevel = Number(userProgress.current_level) || 1;
@@ -251,6 +276,7 @@ export async function POST(request: Request) {
             oldSurgeon = Number(userProgress.surgeon_badge_unlocked) || 0;
             oldVector = Number(userProgress.vector_lock_badge_unlocked) || 0;
             oldVanguard = Number(userProgress.vanguard_badge_unlocked) || 0;
+            gamesPlayed = Number(userProgress.total_games) || 0;
         }
 
         // Milestone Badge Checklist
@@ -277,12 +303,22 @@ export async function POST(request: Request) {
         const xpNeededForNext = progress.xpNeededForNext;
         const levelUp = currentLevel > oldLevel;
 
+        // XP Factor Distribution
+        const xpDist = distributeXp(exerciseId, xpEarned);
+
+        // Quadrant Processing
+        let qTL = 0, qTR = 0, qBL = 0, qBR = 0;
+        if (missQuadrants) {
+            const total = (missQuadrants.topLeft || 0) + (missQuadrants.topRight || 0) + (missQuadrants.bottomLeft || 0) + (missQuadrants.bottomRight || 0);
+            if (total > 0) {
+                qTL = (missQuadrants.topLeft || 0) / total;
+                qTR = (missQuadrants.topRight || 0) / total;
+                qBL = (missQuadrants.bottomLeft || 0) / total;
+                qBR = (missQuadrants.bottomRight || 0) / total;
+            }
+        }
+
         // Atomic D1 Execution
-        // SQL migration required on first deploy:
-        //   ALTER TABLE scores_telemetry ADD COLUMN average_urgency_index REAL DEFAULT 1.0;
-        //   ALTER TABLE scores_telemetry ADD COLUMN over_flick_coefficient REAL DEFAULT 1.0;
-        //   ALTER TABLE scores_telemetry ADD COLUMN miss_quadrants TEXT;
-        //   ALTER TABLE scores_telemetry ADD COLUMN neural_stability_score REAL DEFAULT NULL;
         const missQuadrantsStr = missQuadrants ? JSON.stringify(missQuadrants) : null;
         const stmtTelemetry = db.prepare(`
             INSERT INTO scores_telemetry
@@ -295,16 +331,37 @@ export async function POST(request: Request) {
         );
 
         const stmtProgression = db.prepare(`
-            INSERT INTO user_progression (user_id, current_level, total_xp, surgeon_badge_unlocked, vector_lock_badge_unlocked, vanguard_badge_unlocked, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO user_progression (
+                user_id, current_level, total_xp, surgeon_badge_unlocked, vector_lock_badge_unlocked, vanguard_badge_unlocked,
+                xp_flicking, xp_tracking, xp_speed, xp_precision, xp_perception, xp_cognition,
+                quadrant_top_left, quadrant_top_right, quadrant_bottom_left, quadrant_bottom_right,
+                total_games, last_played_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ON CONFLICT(user_id) DO UPDATE SET
                 current_level = excluded.current_level,
                 total_xp = excluded.total_xp,
                 surgeon_badge_unlocked = excluded.surgeon_badge_unlocked,
                 vector_lock_badge_unlocked = excluded.vector_lock_badge_unlocked,
                 vanguard_badge_unlocked = excluded.vanguard_badge_unlocked,
+                xp_flicking = xp_flicking + excluded.xp_flicking,
+                xp_tracking = xp_tracking + excluded.xp_tracking,
+                xp_speed = xp_speed + excluded.xp_speed,
+                xp_precision = xp_precision + excluded.xp_precision,
+                xp_perception = xp_perception + excluded.xp_perception,
+                xp_cognition = xp_cognition + excluded.xp_cognition,
+                quadrant_top_left = CASE WHEN total_games = 0 THEN excluded.quadrant_top_left ELSE (quadrant_top_left * 0.8 + excluded.quadrant_top_left * 0.2) END,
+                quadrant_top_right = CASE WHEN total_games = 0 THEN excluded.quadrant_top_right ELSE (quadrant_top_right * 0.8 + excluded.quadrant_top_right * 0.2) END,
+                quadrant_bottom_left = CASE WHEN total_games = 0 THEN excluded.quadrant_bottom_left ELSE (quadrant_bottom_left * 0.8 + excluded.quadrant_bottom_left * 0.2) END,
+                quadrant_bottom_right = CASE WHEN total_games = 0 THEN excluded.quadrant_bottom_right ELSE (quadrant_bottom_right * 0.8 + excluded.quadrant_bottom_right * 0.2) END,
+                total_games = total_games + 1,
+                last_played_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
-        `).bind(userId, currentLevel, newTotalXp, surgeonBadgeUnlocked, vectorLockBadgeUnlocked, oldVanguard);
+        `).bind(
+            userId, currentLevel, newTotalXp, surgeonBadgeUnlocked, vectorLockBadgeUnlocked, oldVanguard,
+            xpDist.xpGainedFlicking, xpDist.xpGainedTracking, xpDist.xpGainedSpeed, xpDist.xpGainedPrecision, xpDist.xpGainedPerception, xpDist.xpGainedCognition,
+            qTL, qTR, qBL, qBR
+        );
 
         await db.batch([stmtTelemetry, stmtProgression]);
 
