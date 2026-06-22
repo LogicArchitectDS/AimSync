@@ -67,7 +67,8 @@ export async function POST(request: Request) {
 
     // Shared security token authentication
     const secret = body.secret;
-    const expectedSecret = process.env.COMMUNITY_BOSS_FIGHT_SECRET || "VANGUARD_DEV_SECRET";
+    const expectedSecret = process.env.COMMUNITY_BOSS_FIGHT_SECRET;
+    if (!expectedSecret) throw new Error("COMMUNITY_BOSS_FIGHT_SECRET environment variable is not set");
 
     if (secret !== expectedSecret) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

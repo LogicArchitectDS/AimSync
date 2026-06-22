@@ -694,25 +694,25 @@ export function useBaseGameEngine({
       console.error("Failed to check high score for ghost:", e);
     }
 
-    if (isNewHighScore) {
-      try {
-        const { compressGhost } = require("@/lib/utils/ghostCompression");
-        const ghostRecord = {
-          modeId,
-          difficulty: resultData.difficulty,
-          score: finalScore,
-          targets: recordingTargetsRef.current,
-          path: recordingPathRef.current,
-          hits: recordingHitsRef.current,
-        };
-        const compressed = compressGhost(ghostRecord);
-        resultData.ghostTelemetry = compressed;
-        
+    try {
+      const { compressGhost } = require("@/lib/utils/ghostCompression");
+      const ghostRecord = {
+        modeId,
+        difficulty: resultData.difficulty,
+        score: finalScore,
+        targets: recordingTargetsRef.current,
+        path: recordingPathRef.current,
+        hits: recordingHitsRef.current,
+      };
+      const compressed = compressGhost(ghostRecord);
+      resultData.ghostTelemetry = compressed;
+      
+      if (isNewHighScore) {
         // Save locally as personal best ghost
         localStorage.setItem(`aimsync_ghost_${modeId}_${resultData.difficulty}`, compressed);
-      } catch (err) {
-        console.error("Failed to save high score ghost:", err);
       }
+    } catch (err) {
+      console.error("Failed to generate/save ghost:", err);
     }
 
     await updateStatsWithResult(resultData);

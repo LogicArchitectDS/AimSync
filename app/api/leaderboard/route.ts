@@ -53,7 +53,7 @@ export async function GET(request: Request) {
             const rivalRecord = await db.prepare(`
                 SELECT ghost_telemetry
                 FROM scores_telemetry
-                WHERE exercise_id = ? AND difficulty = ? AND username = ? AND ghost_telemetry IS NOT NULL
+                WHERE exercise_id = ? AND difficulty = ? AND username = ? AND ghost_telemetry IS NOT NULL AND (flagged = 0 OR flagged IS NULL)
                 ORDER BY score DESC
                 LIMIT 1
             `).bind(exerciseId, difficulty, rivalUsername).first();
@@ -85,10 +85,10 @@ export async function GET(request: Request) {
             INNER JOIN (
                 SELECT username, MAX(score) as max_score
                 FROM scores_telemetry
-                WHERE exercise_id = ? AND difficulty = ?
+                WHERE exercise_id = ? AND difficulty = ? AND (flagged = 0 OR flagged IS NULL)
                 GROUP BY username
             ) t2 ON t1.username = t2.username AND t1.score = t2.max_score
-            WHERE t1.exercise_id = ? AND t1.difficulty = ?
+            WHERE t1.exercise_id = ? AND t1.difficulty = ? AND (t1.flagged = 0 OR t1.flagged IS NULL)
             ORDER BY t1.score DESC, t1.created_at ASC
             LIMIT 10
         `).bind(exerciseId, difficulty, exerciseId, difficulty).all();

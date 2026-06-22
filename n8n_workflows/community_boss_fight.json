@@ -62,7 +62,7 @@
         "url": "https://aimsync.pages.dev/api/community/bossfight",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"secret\": \"VANGUARD_DEV_SECRET\",\n  \"forceUnlock\": false\n}",
+        "jsonBody": "{\n  \"secret\": \"your_community_boss_fight_secret_here\",\n  \"forceUnlock\": false\n}",
         "options": {}
       },
       "id": "trigger-vanguard-unlock",

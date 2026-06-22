@@ -48,7 +48,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                 session.user.id = token.id as string
                 
                 // Cryptographically sign the user's ID using the server secret
-                const secret = process.env.AUTH_SECRET || 'fallback-secret-key-aimsync-dev-2026';
+                const secret = process.env.AUTH_SECRET;
+                if (!secret) throw new Error("AUTH_SECRET environment variable is not set");
                 session.user.signature = await generateHmacSha256(token.id as string, secret);
             }
             return session

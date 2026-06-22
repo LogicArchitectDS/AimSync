@@ -180,7 +180,21 @@ export async function POST(request: Request) {
     // 2. Input Anti-Cheat & Telemetry Progression Validation
     const inputVelocity = durationSeconds > 0 ? (totalTargets / durationSeconds) : 0;
     const isArithmeticProgression = checkArithmeticProgression(ghostTelemetry);
-    const isFlagged = (durationSeconds < 5 || inputVelocity > 15 || isArithmeticProgression) ? 1 : 0;
+    const telemetryValidation = validateGhostTelemetry(ghostTelemetry);
+    
+    let isFlagged = 0;
+    let flagReason: string | null = null;
+    
+    if (durationSeconds < 5 || inputVelocity > 15) {
+        isFlagged = 1;
+        flagReason = 'Velocity/Duration Threshold Exceeded';
+    } else if (isArithmeticProgression) {
+        isFlagged = 1;
+        flagReason = 'Arithmetic Progression Timing (Bot/Script)';
+    } else if (telemetryValidation.isSuspicious) {
+        isFlagged = 1;
+        flagReason = telemetryValidation.reason;
+    }
     
     let integrityFlag = 'HIGH_INTEGRITY';
     let xpEarned = 0;
@@ -204,7 +218,7 @@ export async function POST(request: Request) {
                     username,
                     score,
                     is_flagged: 1,
-                    reason: isArithmeticProgression ? 'Arithmetic Progression Timing (Bot/Script)' : 'Velocity/Duration Threshold Exceeded',
+                    reason: flagReason,
                     hardwareProfile: body.hardwareProfile || body.hardware || 'Unknown HWID',
                     telemetrySummary: {
                         hits,
@@ -323,11 +337,12 @@ export async function POST(request: Request) {
         const stmtTelemetry = db.prepare(`
             INSERT INTO scores_telemetry
                 (user_id, exercise_id, difficulty, username, ghost_telemetry, hits, misses, accuracy, max_combo, duration_seconds,
-                 xp_earned, integrity_flag, average_urgency_index, over_flick_coefficient, miss_quadrants, neural_stability_score)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 xp_earned, integrity_flag, average_urgency_index, over_flick_coefficient, miss_quadrants, neural_stability_score, flagged, flag_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(
             userId, exerciseId, difficulty, username, ghostTelemetry, hits, misses, accuracy, maxCombo, durationSeconds,
-            xpEarned, integrityFlag, averageUrgencyIndex, overFlickCoefficient, missQuadrantsStr, neuralStabilityScore
+            xpEarned, integrityFlag, averageUrgencyIndex, overFlickCoefficient, missQuadrantsStr, neuralStabilityScore,
+            isFlagged === 1 ? 1 : 0, flagReason
         );
 
         const stmtProgression = db.prepare(`
@@ -417,4 +432,75 @@ function checkArithmeticProgression(ghostTelemetry: any): boolean {
         // Fail-safe to avoid false positives or crashes on corrupt client inputs
     }
     return false;
+}
+
+// --- Helper: Validate ghost telemetry for perfectly straight lines and instant teleportation ---
+function validateGhostTelemetry(ghostTelemetry: any): { isSuspicious: boolean, reason: string | null } {
+    if (!ghostTelemetry) return { isSuspicious: false, reason: null };
+    try {
+        let ghost;
+        if (typeof ghostTelemetry === 'string') {
+           try {
+               ghost = JSON.parse(ghostTelemetry);
+           } catch {
+               return { isSuspicious: false, reason: null }; 
+           }
+        } else {
+            ghost = ghostTelemetry;
+        }
+
+        const path = ghost.path || ghost.p; // Depending on if it's compressed or decompressed format
+        if (!path || !Array.isArray(path) || path.length < 5) return { isSuspicious: false, reason: null };
+
+        // Configuration Thresholds for Anti-Cheat
+        const MAX_STRAIGHT_LINE_DURATION_MS = 500; // 500ms moving in a perfectly straight line is physically implausible
+        const MAX_TELEPORT_DISTANCE_PER_MS = 50; // max normalized units per ms
+
+        let currentStraightLineStartIdx = 0;
+        
+        for (let i = 1; i < path.length; i++) {
+            const p1 = path[i-1];
+            const p2 = path[i];
+            
+            // p[0] is x, p[1] is y, p[2] is t
+            const dx = p2[0] - p1[0];
+            const dy = p2[1] - p1[1];
+            const dt = p2[2] - p1[2];
+            
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            
+            // Check Teleportation
+            if (dt >= 0 && dt <= 5 && dist > MAX_TELEPORT_DISTANCE_PER_MS * 5) {
+                const speed = dt === 0 ? dist : dist / dt;
+                if (speed > MAX_TELEPORT_DISTANCE_PER_MS) {
+                    return { isSuspicious: true, reason: `Teleportation detected: Speed ${speed.toFixed(2)} units/ms` };
+                }
+            }
+
+            // Check Straight Line
+            if (i >= 2) {
+                const p0 = path[i-2];
+                // Check cross product to see if p0, p1, p2 are collinear
+                const dx1 = p1[0] - p0[0];
+                const dy1 = p1[1] - p0[1];
+                const dx2 = p2[0] - p1[0];
+                const dy2 = p2[1] - p1[1];
+                
+                const crossProduct = dx1 * dy2 - dy1 * dx2;
+                
+                // If the cross product is near 0, they are collinear
+                if (Math.abs(crossProduct) < 0.1 && (Math.abs(dx2) > 0 || Math.abs(dy2) > 0)) {
+                    const duration = p2[2] - path[currentStraightLineStartIdx][2];
+                    if (duration > MAX_STRAIGHT_LINE_DURATION_MS) {
+                        return { isSuspicious: true, reason: `Straight line detected over ${duration}ms` };
+                    }
+                } else {
+                    currentStraightLineStartIdx = i - 1;
+                }
+            }
+        }
+    } catch {
+       // fail safe
+    }
+    return { isSuspicious: false, reason: null };
 }
