@@ -125,3 +125,14 @@ AimSync Codebase Evolution & Integration Log
     - Upgraded Cloud D1 sync: supported atomic sync updates to D1 player_stats and schema migrations.
     - Built Edge API Webhook /api/community/bossfight and composed n8n workflow JSON pipelines (weekly AI coach and community weekend boss fight).
     - Verified compilation and built project successfully with exit code 0.
+
+19. XP and Level Synchronization
+    - Centralized progression calculations into a single progression engine (`lib/utils/progressionEngine.ts`) with clear TS interfaces (`LevelProgress`) to unify XP and level mapping.
+    - Standardized the quadratic progression formula (Total XP = 500 * (level - 1)^2) and its inverse, ensuring identical leveling calculations on the client-side UI, server-side APIs, and Cloudflare D1/Edge backends.
+    - Refactored `lib/game/leveling.ts`, `lib/utils/statsService.ts`, `lib/utils/storage.ts`, and `app/api/scores/route.ts` to delegate XP levels and progression bar percentages to the centralized progression engine.
+
+20. Database Consolidation & Progression Unification
+    - Consolidated schema design to eliminate data redundancy and sync issues. Legacy tables (`training_sessions`, `player_stats`, `player_profiles`) were dropped, moving user statistics, leveling stats, and XP factor details to a consolidated source of truth: `user_progression`.
+    - Maintained granular session tracking by routing telemetry data to `scores_telemetry` (recording difficulty, accuracy, kinematic indices, and session-specific quadrant stats).
+    - Composed SQL migration script (`migrations/0001_consolidate_models.sql`) to safely transfer legacy player progress data into the consolidated tables.
+    - Dropped the redundant `/api/save-session` edge endpoint and funneled scoring telemetry, badges, and progression updates to `/api/scores/route.ts` using batch operations (`db.batch`).
