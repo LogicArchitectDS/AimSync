@@ -15,6 +15,7 @@ import { useGameStore } from '@/store/gameStore';
 import { StorageEngine } from '@/lib/utils/storage';
 import { useRawInput } from '@/hooks/useRawInput';
 import { useWeaponAudio } from '@/hooks/useWeaponAudio';
+import { GameHUDOverlay, GameHUDOverlayRef } from './game/GameHUDOverlay';
 
 // Reusable Vector2 reference to prevent GC allocation in the 144Hz loop
 const CENTER_COORDS = new THREE.Vector2(0, 0);
@@ -30,6 +31,42 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
 
     const raycaster = useRef(new THREE.Raycaster());
     const pendingShot = useRef(false);
+
+    // Ammo tracking (Zero React re-render)
+    const maxAmmo = activeWeapon?.magSize || 30;
+    const ammoRef = useRef(maxAmmo);
+    const isReloading = useRef(false);
+
+    const startTimeRef = useRef(performance.now());
+
+    // Reset ammo on gun swap
+    useEffect(() => {
+        ammoRef.current = activeWeapon?.magSize || 30;
+        window.AimSyncHUD?.updateAmmo(ammoRef.current, activeWeapon?.magSize || 30);
+        isReloading.current = false;
+    }, [activeWeapon]);
+
+    // Reset start time on mode swap
+    useEffect(() => {
+        startTimeRef.current = performance.now();
+    }, [activeMode]);
+
+    // Keyboard listener for manual reload
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key.toLowerCase() === 'r' && ammoRef.current < maxAmmo && !isReloading.current) {
+                isReloading.current = true;
+                // Simulating weapon reload (1.2s)
+                setTimeout(() => {
+                    ammoRef.current = maxAmmo;
+                    window.AimSyncHUD?.updateAmmo(ammoRef.current, maxAmmo);
+                    isReloading.current = false;
+                }, 1200);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [maxAmmo]);
 
     // Dynamic mouse sensitivity loader
     const [sensitivity, setSensitivity] = useState(1.0);
@@ -65,6 +102,24 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
     useFrame(() => {
         if (pendingShot.current) {
             pendingShot.current = false; // Consume the shot
+
+            if (isReloading.current) return;
+
+            if (ammoRef.current <= 0) {
+                // Auto reload if player attempts to fire empty weapon
+                isReloading.current = true;
+                setTimeout(() => {
+                    ammoRef.current = maxAmmo;
+                    window.AimSyncHUD?.updateAmmo(ammoRef.current, maxAmmo);
+                    isReloading.current = false;
+                }, 1200);
+                return;
+            }
+
+            // Decrement Ammo ref & push to HUD directly
+            ammoRef.current--;
+            window.AimSyncHUD?.updateAmmo(ammoRef.current, maxAmmo);
+
             recordShot();
 
             // Play firing sound instantly
@@ -101,6 +156,27 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
 
             const intersects = raycaster.current.intersectObjects(targets, true);
 
+            const updateHUDStats = (isHit: boolean) => {
+                const currentStore = useGameStore.getState();
+                const newScore = currentStore.score;
+                const totalShots = currentStore.shotsFired;
+                const accuracy = Math.round((newScore / Math.max(1, totalShots)) * 100);
+                const elapsed = (performance.now() - startTimeRef.current) / 1000;
+                const kps = elapsed > 0 ? (newScore / elapsed).toFixed(2) : '0.00';
+
+                window.AimSyncHUD?.updateTelemetry({
+                    score: newScore,
+                    accuracy: accuracy,
+                    hits: newScore,
+                    misses: totalShots - newScore,
+                    kps: parseFloat(kps)
+                });
+                
+                if (!isHit) {
+                    window.AimSyncHUD?.updateCombo(0);
+                }
+            };
+
             if (intersects.length > 0) {
                 const hitObject = intersects[0].object;
                 if (hitObject.name === 'target') {
@@ -111,6 +187,7 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
                         if (hitObject.userData.isFriendly) {
                             // Protocol 2: Left-clicking a friendly mesh instantly resets combo
                             recordMiss();
+                            updateHUDStats(false);
                         } else {
                             // Protocol 1: Echolocation sound tracking reaction check
                             if (activeMode === 'echolocation') {
@@ -124,6 +201,26 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
                             } else {
                                 recordHit(10);
                             }
+
+                            // Trigger hitmarker on the HUD
+                            window.AimSyncHUD?.triggerHitMarker();
+
+                            // Compute projected screen coordinates to spawn floating combo text directly on target
+                            const tempV = new THREE.Vector3();
+                            hitObject.getWorldPosition(tempV);
+                            tempV.project(camera);
+                            const x = (tempV.x * 0.5 + 0.5) * window.innerWidth;
+                            const y = (-(tempV.y * 0.5) + 0.5) * window.innerHeight;
+
+                            const currentStore = useGameStore.getState();
+                            const newCombo = currentStore.combo;
+                            
+                            window.AimSyncHUD?.updateCombo(newCombo, x, y);
+                            updateHUDStats(true);
+
+                            // Push to killfeed
+                            const isHeadshot = Math.random() > 0.6;
+                            window.AimSyncHUD?.addKillfeed('Player', 'Hostile', activeWeapon?.name || 'Pistol', isHeadshot);
                         }
 
                         if (hitObject.userData.onHit) {
@@ -132,9 +229,11 @@ function EngineCore({ targetScale, activeMode }: { targetScale: number, activeMo
                     }
                 } else if (hitObject.name !== 'tracking-target') {
                     recordMiss();
+                    updateHUDStats(false);
                 }
             } else {
                 recordMiss();
+                updateHUDStats(false);
             }
         }
     });
@@ -182,14 +281,16 @@ export default function GameCanvas() {
     const [playlistTasks, setPlaylistTasks] = useState<any[]>([]);
     const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
 
-    // Match State
+    // Match State (decoupling high-frequency timer ticks from state)
     const [activeMode, setActiveMode] = useState(paramMode);
     const [timeLimit, setTimeLimit] = useState(paramTime);
     const [difficulty, setDifficulty] = useState(paramDiff);
-    const [timeLeft, setTimeLeft] = useState(paramTime);
     const [isMatchOver, setIsMatchOver] = useState(false);
 
-    // 3. Playlist Initialization
+    const timeLeftRef = useRef(paramTime);
+    const hudRef = useRef<GameHUDOverlayRef>(null);
+
+    // 3. Playlist/Task Initialization
     useEffect(() => {
         if (playlistId) {
             const allPlaylists = StorageEngine.getPlaylists();
@@ -203,32 +304,56 @@ export default function GameCanvas() {
                 setActiveMode(firstTask.mode);
                 setDifficulty(firstTask.difficulty);
                 setTimeLimit(firstTask.timeLimit);
-                setTimeLeft(firstTask.timeLimit);
+                timeLeftRef.current = firstTask.timeLimit;
             }
         } else {
             // Standard single-mode deployment
             setActiveMode(paramMode);
             setDifficulty(paramDiff);
             setTimeLimit(paramTime);
-            setTimeLeft(paramTime);
+            timeLeftRef.current = paramTime;
         }
     }, [playlistId, paramMode, paramTime, paramDiff]);
 
-    // 4. The Countdown Timer
+    // Reset global state store on active mode changes & sync HUD
+    useEffect(() => {
+        useGameStore.getState().reset();
+        
+        // Wait for HUD overlay mounting before pushing initial values
+        const initHUD = () => {
+            if (window.AimSyncHUD) {
+                window.AimSyncHUD.updateTimer(timeLimit);
+                const currentWeapon = useWeaponStore.getState().activeWeapon;
+                window.AimSyncHUD.updateAmmo(currentWeapon?.magSize || 30, currentWeapon?.magSize || 30);
+                window.AimSyncHUD.updateCombo(0);
+                window.AimSyncHUD.updateTelemetry({ score: 0, accuracy: 100, hits: 0, misses: 0, kps: 0 });
+            } else {
+                requestAnimationFrame(initHUD);
+            }
+        };
+        initHUD();
+    }, [activeMode, timeLimit, currentTaskIndex]);
+
+    // 4. The Countdown Timer (zero-re-render update loop)
     useEffect(() => {
         if (timeLimit <= 0) return; // Freeplay sandbox mode
 
         const timer = setInterval(() => {
-            setTimeLeft((prev) => {
-                if (prev <= 1) {
-                    clearInterval(timer);
-                    setIsMatchOver(true);
-                    // Automatically unlock pointer so they can click the Next Task button
-                    document.exitPointerLock?.();
-                    return 0;
-                }
-                return prev - 1;
-            });
+            timeLeftRef.current -= 1;
+            
+            // Push directly to UI Layer
+            if (hudRef.current) {
+                hudRef.current.updateTimer(timeLeftRef.current);
+            } else {
+                window.AimSyncHUD?.updateTimer(timeLeftRef.current);
+            }
+
+            if (timeLeftRef.current <= 0) {
+                clearInterval(timer);
+                setIsMatchOver(true);
+                // Automatically unlock pointer so they can click the Next Task button
+                document.exitPointerLock?.();
+            }
         }, 1000);
 
         return () => clearInterval(timer);
@@ -256,7 +381,7 @@ export default function GameCanvas() {
             setActiveMode(nextTask.mode);
             setDifficulty(nextTask.difficulty);
             setTimeLimit(nextTask.timeLimit);
-            setTimeLeft(nextTask.timeLimit);
+            timeLeftRef.current = nextTask.timeLimit;
             setIsMatchOver(false);
         } else {
             router.push('/dashboard');
@@ -314,32 +439,27 @@ export default function GameCanvas() {
 
     // --- REGULAR GAME RENDER ---
     return (
-        <div className="w-full h-screen bg-zinc-900 relative">
+        <div className="w-full h-screen bg-zinc-900 relative overflow-hidden">
 
-            <div className="absolute top-4 left-4 z-10 text-white/50 font-mono text-[10px] uppercase tracking-widest pointer-events-none">
+            <div className="absolute top-4 left-4 z-50 text-white/50 font-mono text-[10px] uppercase tracking-widest pointer-events-none">
                 {activeMode.replace('-', ' ')} // {difficulty} // Click to lock crosshair
             </div>
 
-            {/* The Tactical HUD */}
-            {timeLimit > 0 && (
-                <div className="absolute top-8 left-0 right-0 flex flex-col items-center z-10 pointer-events-none">
-                    <div className="text-4xl font-mono font-black text-white bg-[#121212]/80 backdrop-blur-md px-8 py-2 rounded-lg border border-white/10 shadow-[0_0_30px_rgba(0,0,0,0.8)]">
-                        {timeLeft}<span className="text-[#3366FF] text-2xl">s</span>
-                    </div>
-                    {/* The Playlist Progress Tracker */}
-                    {playlistTasks.length > 0 && (
-                        <div className="mt-2 flex gap-1">
-                            {playlistTasks.map((_, i) => (
-                                <div key={i} className={`h-1.5 w-6 rounded-full ${i <= currentTaskIndex ? 'bg-[#3366FF] shadow-[0_0_10px_rgba(51,102,255,0.8)]' : 'bg-white/10'}`} />
-                            ))}
-                        </div>
-                    )}
+            {/* Playlist Progress Tracker */}
+            {playlistTasks.length > 0 && (
+                <div className="absolute top-20 left-1/2 -translate-x-1/2 mt-2 flex gap-1 z-50 pointer-events-none">
+                    {playlistTasks.map((_, i) => (
+                        <div key={i} className={`h-1.5 w-6 rounded-full ${i <= currentTaskIndex ? 'bg-[#3366FF] shadow-[0_0_10px_rgba(51,102,255,0.8)]' : 'bg-white/10'}`} />
+                    ))}
                 </div>
             )}
 
             <Canvas>
                 <EngineCore targetScale={getTargetScale()} activeMode={activeMode} />
             </Canvas>
+
+            {/* Zero Re-Render HUD Overlay */}
+            <GameHUDOverlay ref={hudRef} />
         </div>
     );
 }
